@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="v3_block">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <!-- if your cube is centered and sinks into ground, keep this -->
+        <pose>0 0 0.03 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://v3_block/meshes/v3_block.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+      </visual>
+      <collision name="collision">
+        <pose>0 0 0.03 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://v3_block/meshes/v3_block.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
