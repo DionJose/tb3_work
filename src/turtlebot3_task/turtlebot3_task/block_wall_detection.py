@@ -1,11 +1,8 @@
-<<<<<<< HEAD
-=======
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge # Translates ROS images to OpenCV
->>>>>>> f5926d9 (fixed camera)
 import cv2
 import cv2.aruco as aruco
 import numpy as np
