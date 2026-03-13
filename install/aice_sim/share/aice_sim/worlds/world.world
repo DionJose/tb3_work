@@ -1,0 +1,265 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="default">
+
+    <light name="sun" type="directional">
+      <cast_shadows>1</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>1</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <cast_shadows>0</cast_shadows>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <model name="wall_north">
+      <static>1</static>
+      <pose>0 1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_south">
+      <static>1</static>
+      <pose>0 -1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_east">
+      <static>1</static>
+      <pose>1.05 0 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_west">
+      <static>1</static>
+      <pose>-1.05 0 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_corner_ne">
+      <static>1</static>
+      <pose>1.05 1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_corner_nw">
+      <static>1</static>
+      <pose>-1.05 1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_corner_se">
+      <static>1</static>
+      <pose>1.05 -1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_corner_sw">
+      <static>1</static>
+      <pose>-1.05 -1.05 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.10 0.10 0.20</size></box></geometry>
+          <material>
+            <ambient>0.45 0.30 0.15 1</ambient>
+            <diffuse>0.55 0.37 0.18 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+            <emissive>0 0 0 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="v3_block_blue">
+      <static>0</static>
+      <pose>-0.5 0 0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <pose>0 0 0.03 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://v3_block/meshes/v3_block.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Blue</name>
+            </script>
+          </material>
+        </visual>
+        <collision name="collision">
+          <pose>0 0 0.03 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://v3_block/meshes/v3_block.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="v3_block_red">
+      <static>0</static>
+      <pose>0.5 0 0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <pose>0 0 0.03 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://v3_block/meshes/v3_block.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Red</name>
+            </script>
+          </material>
+        </visual>
+        <collision name="collision">
+          <pose>0 0 0.03 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://v3_block/meshes/v3_block.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+  </world>
+</sdf>
