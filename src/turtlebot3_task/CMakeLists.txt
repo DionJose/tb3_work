@@ -18,4 +18,9 @@ install(DIRECTORY models
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+	turtlebot3_task/block_wall_detection.py
+	DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
