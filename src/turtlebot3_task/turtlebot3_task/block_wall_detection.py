@@ -1,89 +1,101 @@
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge # Translates ROS images to OpenCV
 import cv2
 import cv2.aruco as aruco
 import numpy as np
-import sys
 
-print("--- Starting Robot Master Vision ---")
+class GazeboVisionNode(Node):
+    def __init__(self):
+        super().__init__('gazebo_vision_node')
+        
+        # 1. ROS2 Setup
+        # Gazebo TurtleBot3 camera topic is usually /camera/image_raw
+        self.subscription = self.create_subscription(
+            Image,
+            '/camera/image_raw', 
+            self.image_callback,
+            10)
+        self.bridge = CvBridge()
 
-# --- 1. SETUP ARUCO (Version Compatible) ---
-try:
-    # Modern OpenCV (4.7.0+)
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    parameters = aruco.DetectorParameters()
-    detector = aruco.ArucoDetector(aruco_dict, parameters)
-    print("Using Modern ArUco Detector")
-except AttributeError:
-    # Legacy OpenCV
-    aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)
-    parameters = aruco.DetectorParameters_create()
-    detector = None
-    print("Using Legacy ArUco Detector")
+        # 2. ArUco Setup (Your version-compatible logic)
+        try:
+            self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+            self.parameters = aruco.DetectorParameters()
+            self.detector = aruco.ArucoDetector(self.aruco_dict, self.parameters)
+            print("Using Modern ArUco Detector")
+        except AttributeError:
+            self.aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)
+            self.parameters = aruco.DetectorParameters_create()
+            self.detector = None
+            print("Using Legacy ArUco Detector")
 
-# --- 2. SETUP CAMERA ---
-cap = cv2.VideoCapture(0)
+    def image_callback(self, msg):
+        # Convert the Gazebo image to an OpenCV frame
+        frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        
+        # --- YOUR EXACT VALUES AND LOGIC ---
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-if not cap.isOpened():
-    print("ERROR: Could not open camera.")
-    sys.exit()
+        # Blue Mask
+        lower_blue = np.array([110, 150, 50]) 
+        upper_blue = np.array([125, 255, 255])
+        mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
 
-print("SUCCESS: Camera active. Press 'q' to quit.")
+        # Red Mask
+        lower_red = np.array([165, 150, 70]) 
+        upper_red = np.array([180, 255, 255])
+        mask_red = cv2.inRange(hsv, lower_red, upper_red)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+        # --- ARUCO DETECTION ---
+        if self.detector:
+            corners, ids, rejected = self.detector.detectMarkers(frame)
+        else:
+            corners, ids, rejected = aruco.detectMarkers(frame, self.aruco_dict, parameters=self.parameters)
 
-    # Convert to HSV for color detection
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        if ids is not None:
+            aruco.drawDetectedMarkers(frame, corners, ids)
+            for i, marker_id in enumerate(ids):
+                cv2.putText(frame, f"WALL ID: {marker_id[0]}", (10, 50 + i*35), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-    # --- 3. COLOR DETECTION: BLUE (Your exact numbers) ---
-    lower_blue = np.array([110, 150, 50]) 
-    upper_blue = np.array([125, 255, 255])
-    mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+        # --- TARGETING: DRAW BOXES ---
+        # Blue
+        blue_cnts, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in blue_cnts:
+            if cv2.contourArea(cnt) > 500: # Lowered for Gazebo distance
+                x, y, w, h = cv2.boundingRect(cnt)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                # PRINT COORDINATES TO TERMINAL
+                print(f"BLUE CUBE detected at X: {x + w//2}")
 
-    # --- 4. COLOR DETECTION: RED (Your exact numbers) ---
-    lower_red = np.array([165, 150, 70]) 
-    upper_red = np.array([180, 255, 255])
-    mask_red = cv2.inRange(hsv, lower_red, upper_red)
+        # Red
+        red_cnts, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in red_cnts:
+            if cv2.contourArea(cnt) > 500:
+                x, y, w, h = cv2.boundingRect(cnt)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                # PRINT COORDINATES TO TERMINAL
+                print(f"RED CUBE detected at X: {x + w//2}")
 
-    # --- 5. ARUCO DETECTION: WALLS (Version Compatible) ---
-    if detector:
-        # Modern Way
-        corners, ids, rejected = detector.detectMarkers(frame)
-    else:
-        # Legacy Way
-        corners, ids, rejected = aruco.detectMarkers(frame, aruco_dict, parameters=parameters)
+        # --- DISPLAY ---
+        cv2.imshow('Gazebo Robot View', frame)
+        cv2.imshow('Red Mask', mask_red)
+        cv2.imshow('Blue Mask', mask_blue)
+        cv2.waitKey(1)
 
-    # Label markers if found
-    if ids is not None:
-        aruco.drawDetectedMarkers(frame, corners, ids)
-        for i, marker_id in enumerate(ids):
-            cv2.putText(frame, f"WALL ID: {marker_id[0]}", (10, 50 + i*35), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+def main(args=None):
+    rclpy.init(args=args)
+    node = GazeboVisionNode()
+    print("Vision Node Started. Waiting for Gazebo camera feed...")
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    node.destroy_node()
+    rclpy.shutdown()
+    cv2.destroyAllWindows()
 
-    # --- 6. TARGETING: DRAW BOXES ON CUBES ---
-    # Blue Contours
-    blue_cnts, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for cnt in blue_cnts:
-        if cv2.contourArea(cnt) > 2000:
-            x, y, w, h = cv2.boundingRect(cnt)
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            cv2.putText(frame, "BLUE CUBE", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-
-    # Red Contours
-    red_cnts, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for cnt in red_cnts:
-        if cv2.contourArea(cnt) > 2000:
-            x, y, w, h = cv2.boundingRect(cnt)
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            cv2.putText(frame, "RED CUBE", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
-    # --- 7. DISPLAY WINDOWS ---
-    cv2.imshow('Robot Master Vision', frame)
-    cv2.imshow('Red Mask', mask_red)
-    cv2.imshow('Blue Mask', mask_blue)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == '__main__':
+    main()
