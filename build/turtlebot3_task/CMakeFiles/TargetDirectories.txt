@@ -1,9 +1,0 @@
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/uninstall.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/turtlebot3_task_uninstall.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/test.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/edit_cache.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/rebuild_cache.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/list_install_components.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/install.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/install/local.dir
-/home/aice/ros2_ws/build/turtlebot3_task/CMakeFiles/install/strip.dir
