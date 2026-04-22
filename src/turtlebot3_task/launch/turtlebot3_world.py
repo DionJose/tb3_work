@@ -23,7 +23,7 @@ def generate_launch_description():
 
     #  Package share directories
 
-    pkg_aice_sim      = get_package_share_directory('aice_sim')
+    pkg_aice_sim      = get_package_share_directory('turtlebot3_task')
     pkg_gazebo_ros    = get_package_share_directory('gazebo_ros')
     pkg_tb3_gazebo    = get_package_share_directory('turtlebot3_gazebo')
     tb3_launch_dir    = os.path.join(pkg_tb3_gazebo, 'launch')

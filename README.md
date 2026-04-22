@@ -26,5 +26,28 @@
 #### 5.1. Create a CAD model
 #### 5.2. Add it to the TurtleBot3 model in Gazebo
 
+
+# Tutorial
+
+## Build (DO THIS FIRST, ESPECIALLY IF YOU'VE MADE CHANGES!!!)
+```
+cd ~/ros2_ws
+rm -rf build/ install/ log/
+colcon build
+```
+![Expected output](/images/expected_output.png)
+
+Remember to source after building!
+```
+source install/setup.bash
+```
+
+## Launching Arena World
+```
+cd ~/ros2_ws
+ros2 launch turtlebot3_task turtlebot3_world.py
+```
+
+
 ## Note:
 All executable code goes to the turtlebot3_task folder, any worlds into worlds folder, models into models, etc. (look in the turtlebot3_gazebo folder for an example).
