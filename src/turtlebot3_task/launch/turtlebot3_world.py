@@ -17,6 +17,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -27,6 +28,13 @@ def generate_launch_description():
     pkg_gazebo_ros    = get_package_share_directory('gazebo_ros')
     pkg_tb3_gazebo    = get_package_share_directory('turtlebot3_gazebo')
     tb3_launch_dir    = os.path.join(pkg_tb3_gazebo, 'launch')
+
+    # Gazebo spawns *this* SDF (with your meshes), not the copy under
+    # /opt/ros/.../turtlebot3_gazebo — keep path in sync with TURTLEBOT3_MODEL.
+    tb3_model = os.environ.get('TURTLEBOT3_MODEL', 'waffle_pi')
+    tb3_model_sdf = os.path.join(
+        pkg_aice_sim, 'models', f'turtlebot3_{tb3_model}', 'model.sdf',
+    )
 
 
     #  Launch arguments
@@ -87,15 +95,19 @@ def generate_launch_description():
 
 
     #  Spawn TurtleBot3 into the running Gazebo world
+    #  (use turtlebot3_task/models/.../model.sdf so custom meshes in this package apply)
 
-    spawn_turtlebot = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(tb3_launch_dir, 'spawn_turtlebot3.launch.py')
-        ),
-        launch_arguments={
-            'x_pose': x_pose,
-            'y_pose': y_pose,
-        }.items(),
+    spawn_turtlebot = Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        arguments=[
+            '-entity', tb3_model,
+            '-file', tb3_model_sdf,
+            '-x', x_pose,
+            '-y', y_pose,
+            '-z', '0.01',
+        ],
+        output='screen',
     )
 
     #  Assemble launch description

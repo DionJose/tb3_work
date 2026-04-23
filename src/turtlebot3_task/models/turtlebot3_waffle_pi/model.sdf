@@ -489,6 +489,54 @@
       </axis>
     </joint>
 
+    <!-- Grabber rail / extension — place CAD/grabber_extension.stl under meshes/ (see README). -->
+    <link name="grabber_link">
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.0001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.0001</iyy>
+          <iyz>0</iyz>
+          <izz>0.0001</izz>
+        </inertia>
+      </inertial>
+      <visual name="grabber_visual">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://turtlebot3_waffle_pi/meshes/grabber_extension.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.25 0.45 0.35 1.0</ambient>
+          <diffuse>0.30 0.55 0.40 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="grabber_collision">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://turtlebot3_waffle_pi/meshes/grabber_extension.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="grabber_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>grabber_link</child>
+      <!-- Tune X Y Z roll pitch yaw so the mesh sits on the robot; start: slightly forward of base -->
+      <pose>0.12 0 0.04 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
     <plugin name="turtlebot3_diff_drive" filename="libgazebo_ros_diff_drive.so">
 
       <ros>
