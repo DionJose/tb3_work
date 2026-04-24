@@ -16,7 +16,7 @@ class GazeboVisionNode(Node):
         # Gazebo TurtleBot3 camera topic is usually /camera/image_raw
         self.subscription = self.create_subscription(
             Image,
-            '/camera/image_raw', 
+            '/camera/image_raw/compressed', 
             self.image_callback,
             10)
         self.bridge = CvBridge()
