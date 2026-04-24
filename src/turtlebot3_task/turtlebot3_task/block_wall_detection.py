@@ -6,6 +6,7 @@ from cv_bridge import CvBridge # Translates ROS images to OpenCV
 import cv2
 import cv2.aruco as aruco
 import numpy as np
+from geometry_msgs.msg import Point
 
 class GazeboVisionNode(Node):
     def __init__(self):
@@ -19,6 +20,8 @@ class GazeboVisionNode(Node):
             self.image_callback,
             10)
         self.bridge = CvBridge()
+
+        self.block_pub = self.create_publisher(Point, '/block_info', 10)
 
         # 2. ArUco Setup (Your version-compatible logic)
         try:
@@ -44,10 +47,23 @@ class GazeboVisionNode(Node):
         upper_blue = np.array([125, 255, 255])
         mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
 
-        # Red Mask
-        lower_red = np.array([165, 150, 70]) 
-        upper_red = np.array([180, 255, 255])
-        mask_red = cv2.inRange(hsv, lower_red, upper_red)
+        # # Red Mask
+        # lower_red = np.array([165, 150, 70]) 
+        # upper_red = np.array([180, 255, 255])
+        # mask_red = cv2.inRange(hsv, lower_red, upper_red)
+
+        # Red Mask - Range 1 (Wrap-around start)
+        lower_red_low = np.array([0, 150, 50])
+        upper_red_low = np.array([10, 255, 255])
+        mask_red_low = cv2.inRange(hsv, lower_red_low, upper_red_low)
+
+        # Red Mask - Range 2 (Wrap-around end)
+        lower_red_high = np.array([160, 150, 50]) # Lowered from 165 to be more inclusive
+        upper_red_high = np.array([180, 255, 255])
+        mask_red_high = cv2.inRange(hsv, lower_red_high, upper_red_high)
+
+        # Combine both masks
+        mask_red = cv2.addWeighted(mask_red_low, 1.0, mask_red_high, 1.0, 0.0)
 
         # --- ARUCO DETECTION ---
         if self.detector:
@@ -68,6 +84,13 @@ class GazeboVisionNode(Node):
             if cv2.contourArea(cnt) > 500: # Lowered for Gazebo distance
                 x, y, w, h = cv2.boundingRect(cnt)
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+
+                msg = Point()
+                msg.x = float(x + w//2) # Horizontal center
+                msg.y = float(cv2.contourArea(cnt)) # Using area as a "distance" proxy
+                msg.z = 2.0 # 2 for blue
+                self.block_pub.publish(msg)
+
                 # PRINT COORDINATES TO TERMINAL
                 print(f"BLUE CUBE detected at X: {x + w//2}")
 
@@ -77,6 +100,13 @@ class GazeboVisionNode(Node):
             if cv2.contourArea(cnt) > 500:
                 x, y, w, h = cv2.boundingRect(cnt)
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+
+                msg = Point()
+                msg.x = float(x + w//2) # Horizontal center
+                msg.y = float(cv2.contourArea(cnt)) # Using area as a "distance" proxy
+                msg.z = 1.0 # 1 for blue
+                self.block_pub.publish(msg)
+
                 # PRINT COORDINATES TO TERMINAL
                 print(f"RED CUBE detected at X: {x + w//2}")
 
