@@ -11,26 +11,45 @@ Usage:
 """
 
 import os
-
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
-
 def generate_launch_description():
+    # Package share directories
+    pkg_aice_sim   = get_package_share_directory('turtlebot3_task')
+    pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
+    pkg_tb3_gazebo = get_package_share_directory('turtlebot3_gazebo')
+    tb3_launch_dir = os.path.join(pkg_tb3_gazebo, 'launch')
 
-    #  Package share directories
+    # Models path (install location, works for any username)
+    models_path = os.path.join(pkg_aice_sim, 'models')
 
-    pkg_aice_sim      = get_package_share_directory('turtlebot3_task')
-    pkg_gazebo_ros    = get_package_share_directory('gazebo_ros')
-    pkg_tb3_gazebo    = get_package_share_directory('turtlebot3_gazebo')
-    tb3_launch_dir    = os.path.join(pkg_tb3_gazebo, 'launch')
+    # Fix hardcoded paths in world file at launch time
+    world_src = os.path.join(pkg_aice_sim, 'worlds', 'world.world')
+    with open(world_src, 'r') as f:
+        world_contents = f.read()
 
+    # Replace any hardcoded /home/<whoever>/ros2_ws/... with the actual install path
+    import re
+    world_contents = re.sub(
+        r'file:///home/[^/]+/ros2_ws/[^"]+/models/([^/]+)/materials/scripts/([^"]+)',
+        lambda m: f'file://{models_path}/{m.group(1)}/materials/scripts/{m.group(2)}',
+        world_contents
+    )
 
-    #  Launch arguments
+    # Write fixed world to a temp file
+    import tempfile
+    tmp_world = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.world', delete=False
+    )
+    tmp_world.write(world_contents)
+    tmp_world.flush()
+    world_file = tmp_world.name
 
+    # Launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     x_pose       = LaunchConfiguration('x_pose',       default='0.0')
     y_pose       = LaunchConfiguration('y_pose',       default='0.0')
@@ -38,46 +57,32 @@ def generate_launch_description():
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='true',
         description='Use simulation (Gazebo) clock')
-
     declare_x_pose = DeclareLaunchArgument(
         'x_pose', default_value='0.0',
         description='TurtleBot3 spawn X position')
-
     declare_y_pose = DeclareLaunchArgument(
         'y_pose', default_value='0.0',
         description='TurtleBot3 spawn Y position')
 
-
-    #  World file — provided by this package
-
-    world_file = os.path.join(pkg_aice_sim, 'worlds', 'world.world')
-
-
-    #  Gazebo server  (loads the world + physics)
-
+    # Gazebo server
     gzserver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')
         ),
         launch_arguments={
             'world': world_file,
-            # Comment this out if you don't want Gazebo to print all the extra info in the terminal
             'extra_gazebo_args': '--verbose',
         }.items(),
     )
 
-
-    #  Gazebo client  (the GUI window)
-
+    # Gazebo client
     gzclient = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_gazebo_ros, 'launch', 'gzclient.launch.py')
         )
     )
 
-
-    #  robot_state_publisher  (reads URDF, publishes /tf)
-
+    # robot_state_publisher
     robot_state_publisher = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(tb3_launch_dir, 'robot_state_publisher.launch.py')
@@ -85,9 +90,7 @@ def generate_launch_description():
         launch_arguments={'use_sim_time': use_sim_time}.items(),
     )
 
-
-    #  Spawn TurtleBot3 into the running Gazebo world
-
+    # Spawn TurtleBot3
     spawn_turtlebot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(tb3_launch_dir, 'spawn_turtlebot3.launch.py')
@@ -98,9 +101,12 @@ def generate_launch_description():
         }.items(),
     )
 
-    #  Assemble launch description
-
     return LaunchDescription([
+        # Set GAZEBO_RESOURCE_PATH automatically — no ~/.bashrc edit needed
+        SetEnvironmentVariable(
+            'GAZEBO_RESOURCE_PATH',
+            models_path + ':' + os.environ.get('GAZEBO_RESOURCE_PATH', '')
+        ),
         declare_use_sim_time,
         declare_x_pose,
         declare_y_pose,
