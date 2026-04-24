@@ -24,30 +24,11 @@ def generate_launch_description():
     pkg_tb3_gazebo = get_package_share_directory('turtlebot3_gazebo')
     tb3_launch_dir = os.path.join(pkg_tb3_gazebo, 'launch')
 
-    # Models path (install location, works for any username)
+    # Models path
     models_path = os.path.join(pkg_aice_sim, 'models')
 
-    # Fix hardcoded paths in world file at launch time
-    world_src = os.path.join(pkg_aice_sim, 'worlds', 'world.world')
-    with open(world_src, 'r') as f:
-        world_contents = f.read()
-
-    # Replace any hardcoded /home/<whoever>/ros2_ws/... with the actual install path
-    import re
-    world_contents = re.sub(
-        r'file:///home/[^/]+/ros2_ws/[^"]+/models/([^/]+)/materials/scripts/([^"]+)',
-        lambda m: f'file://{models_path}/{m.group(1)}/materials/scripts/{m.group(2)}',
-        world_contents
-    )
-
-    # Write fixed world to a temp file
-    import tempfile
-    tmp_world = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.world', delete=False
-    )
-    tmp_world.write(world_contents)
-    tmp_world.flush()
-    world_file = tmp_world.name
+    # World file
+    world_file = os.path.join(pkg_aice_sim, 'worlds', 'world.world')
 
     # Launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
@@ -102,10 +83,13 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # Set GAZEBO_RESOURCE_PATH automatically — no ~/.bashrc edit needed
         SetEnvironmentVariable(
             'GAZEBO_RESOURCE_PATH',
             models_path + ':' + os.environ.get('GAZEBO_RESOURCE_PATH', '')
+        ),
+        SetEnvironmentVariable(
+            'GAZEBO_MODEL_PATH',
+            models_path + ':' + os.environ.get('GAZEBO_MODEL_PATH', '')
         ),
         declare_use_sim_time,
         declare_x_pose,
