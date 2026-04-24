@@ -57,10 +57,10 @@
         <visual name="visual">
           <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
           <material>
-            <ambient>0.45 0.30 0.15 1</ambient>
-            <diffuse>0.55 0.37 0.18 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-            <emissive>0 0 0 1</emissive>
+            <script>
+              <uri>file:///home/ubuntu/ros2_ws/src/turtlebot3_task/models/arena_wall_north/materials/scripts/marker_7.material</uri>
+              <name>ArUcoMarker7</name>
+            </script>
           </material>
         </visual>
       </link>
@@ -76,10 +76,10 @@
         <visual name="visual">
           <geometry><box><size>2.0 0.10 0.20</size></box></geometry>
           <material>
-            <ambient>0.45 0.30 0.15 1</ambient>
-            <diffuse>0.55 0.37 0.18 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-            <emissive>0 0 0 1</emissive>
+            <script>
+              <uri>file:///home/ubuntu/ros2_ws/src/turtlebot3_task/models/arena_wall_south/materials/scripts/marker_42.material</uri>
+              <name>ArUcoMarker42</name>
+            </script>
           </material>
         </visual>
       </link>
@@ -95,10 +95,10 @@
         <visual name="visual">
           <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
           <material>
-            <ambient>0.45 0.30 0.15 1</ambient>
-            <diffuse>0.55 0.37 0.18 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-            <emissive>0 0 0 1</emissive>
+            <script>
+              <uri>file:///home/ubuntu/ros2_ws/src/turtlebot3_task/models/arena_wall_east/materials/scripts/marker_23.material</uri>
+              <name>ArUcoMarker23</name>
+            </script>
           </material>
         </visual>
       </link>
@@ -114,10 +114,10 @@
         <visual name="visual">
           <geometry><box><size>0.10 2.0 0.20</size></box></geometry>
           <material>
-            <ambient>0.45 0.30 0.15 1</ambient>
-            <diffuse>0.55 0.37 0.18 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-            <emissive>0 0 0 1</emissive>
+            <script>
+              <uri>file:///home/ubuntu/ros2_ws/src/turtlebot3_task/models/arena_wall_west/materials/scripts/marker_0.material</uri>
+              <name>ArUcoMarker0</name>
+            </script>
           </material>
         </visual>
       </link>
