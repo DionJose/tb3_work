@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 def generate_launch_description():
     # Set environment variables for models
@@ -34,6 +35,16 @@ def generate_launch_description():
         'blue_marker', default_value='0',
         description='ArUco ID assigned to the BLUE goal')
 
+    parameter_storage_node = Node(
+    package='demo_nodes_cpp',
+    executable='parameter_blackboard',
+    name='competition_logic',
+    parameters=[{
+        'red_goal_id': LaunchConfiguration('red_marker'),
+        'blue_goal_id': LaunchConfiguration('blue_marker'),
+    }]
+)
+
     # Gazebo Server & Client
     gzserver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')),
@@ -58,6 +69,7 @@ def generate_launch_description():
     return LaunchDescription([
         declare_red_marker,
         declare_blue_marker,
+        parameter_storage_node,
         DeclareLaunchArgument('x_pose', default_value='0.0'),
         DeclareLaunchArgument('y_pose', default_value='0.0'),
         gzserver,

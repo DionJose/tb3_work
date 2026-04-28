@@ -45,9 +45,17 @@ source install/setup.bash
 ## Launching Arena World
 ```
 cd ~/ros2_ws
-ros2 launch turtlebot3_task turtlebot3_world.py
+ros2 launch turtlebot3_task turtlebot3_world.py red_marker:=<AruCo marker> blue_marker:=<AruCo marker>
 ```
+Available AruCo markers are 0 (W), 7 (N), 23 (E), 42 (S).  
 
+## Checking Blue and Red Markers
+
+After launching the world, if you run 
+```
+ros2 param get /competition_logic (blue/red_goal_id)
+```
+it will tell you which marker has been assigned that colour 
 
 ## Note:
 All executable code goes to the turtlebot3_task folder, any worlds into worlds folder, models into models, etc. (look in the turtlebot3_gazebo folder for an example).
