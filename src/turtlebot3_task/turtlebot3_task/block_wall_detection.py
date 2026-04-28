@@ -16,7 +16,7 @@ class GazeboVisionNode(Node):
         # Gazebo TurtleBot3 camera topic is usually /camera/image_raw
         self.subscription = self.create_subscription(
             Image,
-            '/camera/image_raw/compressed', 
+            '/camera/image_raw', 
             self.image_callback,
             10)
         self.bridge = CvBridge()
@@ -42,9 +42,12 @@ class GazeboVisionNode(Node):
         # --- YOUR EXACT VALUES AND LOGIC ---
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
+        frame_area = frame.shape[0] * frame.shape[1]
+        min_area = frame_area * 0.002
+
         # Blue Mask
-        lower_blue = np.array([110, 150, 50]) 
-        upper_blue = np.array([125, 255, 255])
+        lower_blue = np.array([100, 100, 50]) 
+        upper_blue = np.array([130, 255, 255])
         mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
 
         # # Red Mask
@@ -53,12 +56,12 @@ class GazeboVisionNode(Node):
         # mask_red = cv2.inRange(hsv, lower_red, upper_red)
 
         # Red Mask - Range 1 (Wrap-around start)
-        lower_red_low = np.array([0, 150, 50])
+        lower_red_low = np.array([0, 80, 50])
         upper_red_low = np.array([10, 255, 255])
         mask_red_low = cv2.inRange(hsv, lower_red_low, upper_red_low)
 
         # Red Mask - Range 2 (Wrap-around end)
-        lower_red_high = np.array([160, 150, 50]) # Lowered from 165 to be more inclusive
+        lower_red_high = np.array([160, 80, 50]) # Lowered from 165 to be more inclusive
         upper_red_high = np.array([180, 255, 255])
         mask_red_high = cv2.inRange(hsv, lower_red_high, upper_red_high)
 
@@ -81,7 +84,7 @@ class GazeboVisionNode(Node):
         # Blue
         blue_cnts, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in blue_cnts:
-            if cv2.contourArea(cnt) > 500: # Lowered for Gazebo distance
+            if cv2.contourArea(cnt) > min_area: # Lowered for Gazebo distance
                 x, y, w, h = cv2.boundingRect(cnt)
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
@@ -97,7 +100,7 @@ class GazeboVisionNode(Node):
         # Red
         red_cnts, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in red_cnts:
-            if cv2.contourArea(cnt) > 500:
+            if cv2.contourArea(cnt) > min_area:
                 x, y, w, h = cv2.boundingRect(cnt)
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
 
