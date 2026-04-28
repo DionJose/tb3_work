@@ -24,7 +24,7 @@ def generate_launch_description():
     pkg_tb3_gazebo = get_package_share_directory('turtlebot3_gazebo')
     tb3_launch_dir = os.path.join(pkg_tb3_gazebo, 'launch')
 
-    # Models path
+    # Models pathx``
     models_path = os.path.join(pkg_aice_sim, 'models')
 
     # World file

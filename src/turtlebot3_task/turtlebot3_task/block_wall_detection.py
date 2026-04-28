@@ -115,7 +115,7 @@ class GazeboVisionNode(Node):
         cv2.imshow('Red Mask', mask_red)
         cv2.imshow('Blue Mask', mask_blue)
         cv2.waitKey(1)
-
+#hello
 def main(args=None):
     rclpy.init(args=args)
     node = GazeboVisionNode()
