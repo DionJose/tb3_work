@@ -4,33 +4,29 @@ turtlebot3_world.launch.py
 -------------
 Launches a Gazebo Classic simulation with the AICE2011 v3_block arena and
 spawns a TurtleBot3 waffle_pi in the centre of the arena.
-
-Usage:
-    ros2 launch ros2_ws turtlebot3_world.launch.py
-    ros2 launch ros2_ws sim.launch.py x_pose:=0.0 y_pose:=0.0
 """
-
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
+# Set environment variables at module load time so they apply to all subprocesses
+pkg_aice_sim = get_package_share_directory('turtlebot3_task')
+models_path = os.path.join(pkg_aice_sim, 'models')
+
+os.environ['GAZEBO_RESOURCE_PATH'] = models_path + ':' + os.environ.get('GAZEBO_RESOURCE_PATH', '')
+os.environ['GAZEBO_MODEL_PATH']    = models_path + ':' + os.environ.get('GAZEBO_MODEL_PATH', '')
+
+
 def generate_launch_description():
-    # Package share directories
-    pkg_aice_sim   = get_package_share_directory('turtlebot3_task')
     pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
     pkg_tb3_gazebo = get_package_share_directory('turtlebot3_gazebo')
     tb3_launch_dir = os.path.join(pkg_tb3_gazebo, 'launch')
 
-    # Models pathx``
-    models_path = os.path.join(pkg_aice_sim, 'models')
-
-    # World file
     world_file = os.path.join(pkg_aice_sim, 'worlds', 'world.world')
 
-    # Launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     x_pose       = LaunchConfiguration('x_pose',       default='0.0')
     y_pose       = LaunchConfiguration('y_pose',       default='0.0')
@@ -45,7 +41,6 @@ def generate_launch_description():
         'y_pose', default_value='0.0',
         description='TurtleBot3 spawn Y position')
 
-    # Gazebo server
     gzserver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')
@@ -56,14 +51,12 @@ def generate_launch_description():
         }.items(),
     )
 
-    # Gazebo client
     gzclient = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_gazebo_ros, 'launch', 'gzclient.launch.py')
         )
     )
 
-    # robot_state_publisher
     robot_state_publisher = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(tb3_launch_dir, 'robot_state_publisher.launch.py')
@@ -71,7 +64,6 @@ def generate_launch_description():
         launch_arguments={'use_sim_time': use_sim_time}.items(),
     )
 
-    # Spawn TurtleBot3
     spawn_turtlebot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(tb3_launch_dir, 'spawn_turtlebot3.launch.py')
@@ -83,14 +75,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        SetEnvironmentVariable(
-            'GAZEBO_RESOURCE_PATH',
-            models_path + ':' + os.environ.get('GAZEBO_RESOURCE_PATH', '')
-        ),
-        SetEnvironmentVariable(
-            'GAZEBO_MODEL_PATH',
-            models_path + ':' + os.environ.get('GAZEBO_MODEL_PATH', '')
-        ),
         declare_use_sim_time,
         declare_x_pose,
         declare_y_pose,
