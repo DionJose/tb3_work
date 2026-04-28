@@ -8,23 +8,13 @@
 
 # To Do List
 
-### 1. Set up Tailscale on all devices
-#### 1.1. Instructions will be here...
-
-### 2. Add the world with the blocks to the repo
-#### 2.1. I (Denis) will do it over the weekend
-
-### 3. Design two rails for the grabber (Neil)
-#### 3.1. Create a CAD model
-#### 3.2. Add it to the TurtleBot3 model in Gazebo
+### 3. Add it to the TurtleBot3 model in Gazebo
 
 ### 4. Start writing code
 #### 4.1. Block recognition (Duncan)
 #### 4.2. Arena discovery (Duncan)
 
-### 5. Design the camera mount (Duncan)
-#### 5.1. Create a CAD model
-#### 5.2. Add it to the TurtleBot3 model in Gazebo
+### 5.Add it to the TurtleBot3 model in Gazebo
 
 
 # Tutorial
