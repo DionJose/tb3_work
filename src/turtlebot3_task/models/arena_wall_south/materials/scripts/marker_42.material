@@ -8,7 +8,7 @@ material ArUcoMarker42
       diffuse 1.0 1.0 1.0 1.0
       texture_unit
       {
-        texture /home/ubuntu/ros2_ws/install/turtlebot3_task/share/turtlebot3_task/models/arena_wall_south/materials/textures/marker_42.png
+        texture ../textures/marker_42.png
         filtering none
         tex_address_mode clamp
         scale 1 1
