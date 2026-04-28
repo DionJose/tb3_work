@@ -9,6 +9,7 @@ Launches:
   - Raspberry Pi Camera v2 (via v4l2_camera)
   - IMU + base sensors (turtlebot3_node)
   - SLAM Toolbox (online async mode)
+  - Image compressed republisher (image_transport)
 
 Usage:
   ros2 launch turtlebot3_waffle_pi_launch.py
@@ -176,6 +177,23 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # -----------------------------------------------------------------------
+    # 6. Image Compressed Republisher  (image_transport)
+    #    Subscribes: /camera/image_raw  (raw)
+    #    Publishes:  /camera/image_raw/compressed  (compressed)
+    # -----------------------------------------------------------------------
+    image_compressed_republisher = Node(
+        package="image_transport",
+        executable="republish",
+        name="image_compressed_republisher",
+        output="screen",
+        arguments=["raw", "compressed"],
+        remappings=[
+            ("in",  "/camera/image_raw"),
+            ("out", "/camera/image_raw/compressed"),
+        ],
+    )
+
+    # -----------------------------------------------------------------------
     # Assemble LaunchDescription
     # -----------------------------------------------------------------------
     return LaunchDescription(
@@ -195,5 +213,6 @@ def generate_launch_description() -> LaunchDescription:
             lidar_node,
             camera_node,
             slam_toolbox_node,
+            image_compressed_republisher,
         ]
     )
