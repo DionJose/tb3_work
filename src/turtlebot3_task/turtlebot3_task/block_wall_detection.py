@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge # Translates ROS images to OpenCV
 import cv2
 import cv2.aruco as aruco
 import numpy as np
-from geometry_msgs.msg import Point
 
 class GazeboVisionNode(Node):
     def __init__(self):
@@ -65,15 +60,30 @@ class GazeboVisionNode(Node):
         upper_red_high = np.array([180, 255, 255])
         mask_red_high = cv2.inRange(hsv, lower_red_high, upper_red_high)
 
-        # Combine both masks
-        mask_red = cv2.addWeighted(mask_red_low, 1.0, mask_red_high, 1.0, 0.0)
+# TIGHTENED: Lower area threshold to catch blocks at a distance
+_MIN_BLOCK_AREA = 400 
 
-        # --- ARUCO DETECTION ---
-        if self.detector:
-            corners, ids, rejected = self.detector.detectMarkers(frame)
-        else:
-            corners, ids, rejected = aruco.detectMarkers(frame, self.aruco_dict, parameters=self.parameters)
+# ArUco marker width (pixels) above which the robot is "too close"
+_TOO_CLOSE_WIDTH = 140
 
+class VisionHelper:
+    def __init__(self):
+        aruco_dict  = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+        params      = aruco.DetectorParameters()
+        self.detector = aruco.ArucoDetector(aruco_dict, params)
+
+    def analyse(self, frame):
+        h, w = frame.shape[:2]
+        result = {
+            'marker_id': None,
+            'too_close':  False,
+            'color':      None,
+            'center_x':   None,
+            'frame_w':    w,
+        }
+
+        # ArUco Detection
+        corners, ids, _ = self.detector.detectMarkers(frame)
         if ids is not None:
             aruco.drawDetectedMarkers(frame, corners, ids)
             for i, marker_id in enumerate(ids):
