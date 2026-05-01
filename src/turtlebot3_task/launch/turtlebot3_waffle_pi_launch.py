@@ -9,7 +9,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, ThisLaunchFileDir
+from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node, PushRosNamespace, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
@@ -18,30 +18,41 @@ from launch_ros.descriptions import ComposableNode
 def generate_launch_description():
 
     # -------------------------------
-    # ENV VARIABLES (TB3)
+    # ENV VARIABLES
     # -------------------------------
     TURTLEBOT3_MODEL = os.environ.get('TURTLEBOT3_MODEL', 'burger')
     ROS_DISTRO = os.environ.get('ROS_DISTRO', 'humble')
     LDS_MODEL = os.environ.get('LDS_MODEL', 'LDS-01')
 
     # -------------------------------
-    # TB3 PARAMETERS
+    # ARGUMENTS
     # -------------------------------
     namespace = LaunchConfiguration('namespace', default='')
     usb_port = LaunchConfiguration('usb_port', default='/dev/ttyACM0')
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
+    camera = LaunchConfiguration('camera', default='0')
+    width = LaunchConfiguration('width', default='640')
+    height = LaunchConfiguration('height', default='480')
+    format_param = LaunchConfiguration('format', default='rgb8')
+    use_image_view = LaunchConfiguration('use_image_view', default='false')
+
+    # -------------------------------
+    # TB3 PARAM FILE
+    # -------------------------------
     if ROS_DISTRO == 'humble':
         tb3_param_dir = os.path.join(
             get_package_share_directory('turtlebot3_bringup'),
             'param',
             ROS_DISTRO,
-            TURTLEBOT3_MODEL + '.yaml')
+            TURTLEBOT3_MODEL + '.yaml'
+        )
     else:
         tb3_param_dir = os.path.join(
             get_package_share_directory('turtlebot3_bringup'),
             'param',
-            TURTLEBOT3_MODEL + '.yaml')
+            TURTLEBOT3_MODEL + '.yaml'
+        )
 
     # -------------------------------
     # LIDAR SETUP
@@ -60,16 +71,7 @@ def generate_launch_description():
         lidar_launch = 'hlds_laser.launch.py'
 
     # -------------------------------
-    # CAMERA PARAMETERS
-    # -------------------------------
-    camera = LaunchConfiguration('camera', default='0')
-    width = LaunchConfiguration('width', default='640')
-    height = LaunchConfiguration('height', default='480')
-    format_param = LaunchConfiguration('format', default='')
-    use_image_view = LaunchConfiguration('use_image_view', default='false')
-
-    # -------------------------------
-    # CAMERA NODES (COMPOSABLE)
+    # CAMERA NODE (COMPOSABLE)
     # -------------------------------
     composable_nodes = [
         ComposableNode(
@@ -80,7 +82,7 @@ def generate_launch_description():
                 'sensor_mode': '1640:1232',
                 'width': width,
                 'height': height,
-                'format': format_param,
+                'format': format_param,   # now defaults to rgb8
             }],
             extra_arguments=[{'use_intra_process_comms': True}],
         ),
@@ -105,27 +107,13 @@ def generate_launch_description():
         composable_node_descriptions=composable_nodes,
         output='screen',
     )
-    
-    image_compressed_republisher = Node(
-    package='image_transport',
-    executable='republish',
-    name='image_compressed_republisher',
-    arguments=[
-        'raw',
-        'compressed',
-        '--ros-args',
-        '-r', 'in:=/camera/image_raw',
-        '-r', 'out:=/camera/image_raw/compressed'
-    ],
-    output='screen'
-    )
 
     # -------------------------------
-    # RETURN LAUNCH DESCRIPTION
+    # LAUNCH DESCRIPTION
     # -------------------------------
     return LaunchDescription([
 
-        # ---- Arguments ----
+        # Arguments
         DeclareLaunchArgument('namespace', default_value=''),
         DeclareLaunchArgument('usb_port', default_value='/dev/ttyACM0'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
@@ -133,34 +121,38 @@ def generate_launch_description():
         DeclareLaunchArgument('camera', default_value='0'),
         DeclareLaunchArgument('width', default_value='640'),
         DeclareLaunchArgument('height', default_value='480'),
-        DeclareLaunchArgument('format', default_value=''),
+        DeclareLaunchArgument('format', default_value='rgb8'),
         DeclareLaunchArgument('use_image_view', default_value='false'),
 
-        # ---- Namespace ----
+        # Namespace
         PushRosNamespace(namespace),
 
-        IncludeLaunchDescription(
-	    PythonLaunchDescriptionSource(
-                os.path.join(
-                    get_package_share_directory('turtlebot3_bringup'),
-         	    'launch',
-            	    'turtlebot3_state_publisher.launch.py'
-                )
-   	    ),
-   	    launch_arguments={'use_sim_time': use_sim_time}.items(),
-	),
-
-        # ---- LiDAR ----
+        # TurtleBot3 state publisher (FIXED PATH)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(lidar_pkg_dir, lidar_launch)),
+                os.path.join(
+                    get_package_share_directory('turtlebot3_bringup'),
+                    'launch',
+                    'turtlebot3_state_publisher.launch.py'
+                )
+            ),
+            launch_arguments={
+                'use_sim_time': use_sim_time
+            }.items(),
+        ),
+
+        # LiDAR (FIXED PATH)
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(lidar_pkg_dir, lidar_launch)
+            ),
             launch_arguments={
                 'port': '/dev/ttyUSB0',
                 'frame_id': 'base_scan'
             }.items(),
         ),
 
-        # ---- TurtleBot3 Node ----
+        # TurtleBot3 base node
         Node(
             package='turtlebot3_node',
             executable='turtlebot3_ros',
@@ -169,7 +161,6 @@ def generate_launch_description():
             output='screen'
         ),
 
-        # ---- Camera Container ----
+        # Camera
         camera_container,
-        image_compressed_republisher,
     ])
