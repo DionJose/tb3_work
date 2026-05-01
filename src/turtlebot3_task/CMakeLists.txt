@@ -28,9 +28,6 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-
-
-
 install(PROGRAMS
   turtlebot3_task/navigation.py
   DESTINATION lib/${PROJECT_NAME}
@@ -38,6 +35,11 @@ install(PROGRAMS
 
 install(PROGRAMS
   turtlebot3_task/wall_id_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(PROGRAMS
+  turtlebot3_task/inshallah.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
