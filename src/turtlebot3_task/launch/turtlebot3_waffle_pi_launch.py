@@ -1,221 +1,171 @@
 #!/usr/bin/env python3
-"""
-TurtleBot3 Waffle Pi - Full System Launch File
-ROS 2 Humble
-
-Launches:
-  - Robot state publisher (URDF / TF tree)
-  - LiDAR (LDS-02 via hls_lfcd_lds_driver)
-  - Raspberry Pi Camera v2 (via v4l2_camera)
-  - IMU + base sensors (turtlebot3_node)
-  - SLAM Toolbox (online async mode)
-  - Image compressed republisher (image_transport)
-
-Usage:
-  ros2 launch turtlebot3_waffle_pi_launch.py
-  ros2 launch turtlebot3_waffle_pi_launch.py slam:=false   # skip SLAM
-  ros2 launch turtlebot3_waffle_pi_launch.py use_sim_time:=true  # Gazebo
-"""
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from ament_index_python.resources import has_resource
+
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    GroupAction,
-    IncludeLaunchDescription,
-    LogInfo,
-)
-from launch.conditions import IfCondition, UnlessCondition
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
-from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import LaunchConfiguration, ThisLaunchFileDir
+
+from launch_ros.actions import Node, PushRosNamespace, ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 
 
-# ---------------------------------------------------------------------------
-# Helper: resolve a file path inside a ROS 2 package share directory
-# ---------------------------------------------------------------------------
-def pkg_file(package: str, *path_parts: str) -> str:
-    return os.path.join(get_package_share_directory(package), *path_parts)
+def generate_launch_description():
 
+    # -------------------------------
+    # ENV VARIABLES (TB3)
+    # -------------------------------
+    TURTLEBOT3_MODEL = os.environ.get('TURTLEBOT3_MODEL', 'burger')
+    ROS_DISTRO = os.environ.get('ROS_DISTRO', 'humble')
+    LDS_MODEL = os.environ.get('LDS_MODEL', 'LDS-01')
 
-def generate_launch_description() -> LaunchDescription:
+    # -------------------------------
+    # TB3 PARAMETERS
+    # -------------------------------
+    namespace = LaunchConfiguration('namespace', default='')
+    usb_port = LaunchConfiguration('usb_port', default='/dev/ttyACM0')
+    use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
-    # -----------------------------------------------------------------------
-    # Launch arguments
-    # -----------------------------------------------------------------------
-    use_sim_time_arg = DeclareLaunchArgument(
-        "use_sim_time",
-        default_value="false",
-        description="Use simulation (Gazebo) clock if true",
+    if ROS_DISTRO == 'humble':
+        tb3_param_dir = os.path.join(
+            get_package_share_directory('turtlebot3_bringup'),
+            'param',
+            ROS_DISTRO,
+            TURTLEBOT3_MODEL + '.yaml')
+    else:
+        tb3_param_dir = os.path.join(
+            get_package_share_directory('turtlebot3_bringup'),
+            'param',
+            TURTLEBOT3_MODEL + '.yaml')
+
+    # -------------------------------
+    # LIDAR SETUP
+    # -------------------------------
+    if LDS_MODEL == 'LDS-01':
+        lidar_pkg_dir = get_package_share_directory('hls_lfcd_lds_driver')
+        lidar_launch = 'hlds_laser.launch.py'
+    elif LDS_MODEL == 'LDS-02':
+        lidar_pkg_dir = get_package_share_directory('ld08_driver')
+        lidar_launch = 'ld08.launch.py'
+    elif LDS_MODEL == 'LDS-03':
+        lidar_pkg_dir = get_package_share_directory('coin_d4_driver')
+        lidar_launch = 'single_lidar_node.launch.py'
+    else:
+        lidar_pkg_dir = get_package_share_directory('hls_lfcd_lds_driver')
+        lidar_launch = 'hlds_laser.launch.py'
+
+    # -------------------------------
+    # CAMERA PARAMETERS
+    # -------------------------------
+    camera = LaunchConfiguration('camera', default='0')
+    width = LaunchConfiguration('width', default='640')
+    height = LaunchConfiguration('height', default='480')
+    format_param = LaunchConfiguration('format', default='')
+    use_image_view = LaunchConfiguration('use_image_view', default='false')
+
+    # -------------------------------
+    # CAMERA NODES (COMPOSABLE)
+    # -------------------------------
+    composable_nodes = [
+        ComposableNode(
+            package='camera_ros',
+            plugin='camera::CameraNode',
+            parameters=[{
+                'camera': camera,
+                'sensor_mode': '1640:1232',
+                'width': width,
+                'height': height,
+                'format': format_param,
+            }],
+            extra_arguments=[{'use_intra_process_comms': True}],
+        ),
+    ]
+
+    if has_resource('packages', 'image_view'):
+        composable_nodes.append(
+            ComposableNode(
+                package='image_view',
+                plugin='image_view::ImageViewNode',
+                remappings=[('/image', '/camera/image_raw')],
+                condition=IfCondition(use_image_view),
+                extra_arguments=[{'use_intra_process_comms': True}],
+            )
+        )
+
+    camera_container = ComposableNodeContainer(
+        name='camera_container',
+        namespace='',
+        package='rclcpp_components',
+        executable='component_container',
+        composable_node_descriptions=composable_nodes,
+        output='screen',
     )
-    slam_arg = DeclareLaunchArgument(
-        "slam",
-        default_value="true",
-        description="Launch SLAM Toolbox when true",
-    )
-    slam_params_arg = DeclareLaunchArgument(
-        "slam_params_file",
-        default_value=pkg_file("turtlebot3_navigation2", "param", "waffle_pi.yaml"),
-        description="Full path to the SLAM Toolbox parameter file",
-    )
-    camera_device_arg = DeclareLaunchArgument(
-        "camera_device",
-        default_value="/dev/video0",
-        description="V4L2 device path for the Raspberry Pi Camera",
-    )
-
-    # Convenience references to launch configuration values
-    use_sim_time  = LaunchConfiguration("use_sim_time")
-    slam          = LaunchConfiguration("slam")
-    slam_params   = LaunchConfiguration("slam_params_file")
-    camera_device = LaunchConfiguration("camera_device")
-
-    # -----------------------------------------------------------------------
-    # 1. Robot State Publisher  (URDF + TF tree)
-    # -----------------------------------------------------------------------
-    urdf_file = pkg_file(
-        "turtlebot3_description", "urdf", "turtlebot3_waffle_pi.urdf"
-    )
-    robot_description = Command(["cat ", urdf_file])
-
-    robot_state_publisher = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        name="robot_state_publisher",
-        output="screen",
-        respawn=True,
-        respawn_delay=2.0,
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "robot_description": robot_description,
-            }
-        ],
-    )
-
-    # -----------------------------------------------------------------------
-    # 2. TurtleBot3 Base Node  (OpenCR board — motors, odometry, IMU)
-    # -----------------------------------------------------------------------
-    tb3_param_file = pkg_file(
-        "turtlebot3_node", "param", "waffle_pi.yaml"
-    )
-    turtlebot3_node = Node(
-        package="turtlebot3_node",
-        executable="turtlebot3_ros",
-        name="turtlebot3_node",
-        output="screen",
-        parameters=[
-            tb3_param_file,
-            {"use_sim_time": use_sim_time},
-        ],
-        remappings=[
-            ("odom", "odom"),
-            ("cmd_vel", "cmd_vel"),
-            ("imu", "imu"),
-        ],
-    )
-
-    # -----------------------------------------------------------------------
-    # 3. LiDAR  (LDS-02 — default on Waffle Pi)
-    #    Driver: hls_lfcd_lds_driver  →  publishes /scan
-    # -----------------------------------------------------------------------
-    lidar_node = Node(
-        package="hls_lfcd_lds_driver",
-        executable="hlds_laser_publisher",
-        name="hlds_laser_publisher",
-        output="screen",
-        parameters=[
-            {
-                "port": "/dev/ttyUSB0",   # change if your LiDAR is on a different port
-                "frame_id": "base_scan",
-                "use_sim_time": use_sim_time,
-            }
-        ],
-        remappings=[("scan", "scan")],
-    )
-
-    # -----------------------------------------------------------------------
-    # 4. Camera  (Raspberry Pi Camera v2 via v4l2_camera)
-    #    Publishes: /image_raw, /camera_info
-    # -----------------------------------------------------------------------
-    camera_node = Node(
-        package="v4l2_camera",
-        executable="v4l2_camera_node",
-        name="camera",
-        output="screen",
-        parameters=[
-            {
-                "video_device": camera_device,
-                "image_size": [640, 480],
-                "image_width": 640,
-                "image_height": 480,
-                "camera_frame_id": "camera_rgb_optical_frame",
-                "pixel_format": "YUYV",
-                "use_sim_time": use_sim_time,
-            }
-        ],
-        remappings=[
-            ("image_raw", "/camera/image_raw"),
-            ("camera_info", "/camera/camera_info"),
-        ],
-    )
-
-    # -----------------------------------------------------------------------
-    # 5. SLAM Toolbox  (online async — builds a map in real time)
-    # -----------------------------------------------------------------------
-    slam_toolbox_node = Node(
-        condition=IfCondition(slam),
-        package="slam_toolbox",
-        executable="async_slam_toolbox_node",
-        name="slam_toolbox",
-        output="screen",
-        parameters=[
-            slam_params,
-            {"use_sim_time": use_sim_time},
-        ],
-        remappings=[("scan", "scan")],
-    )
-
-    # -----------------------------------------------------------------------
-    # 6. Image Compressed Republisher  (image_transport)
-    #    Subscribes: /camera/image_raw  (raw)
-    #    Publishes:  /camera/image_raw/compressed  (compressed)
-    # -----------------------------------------------------------------------
+    
     image_compressed_republisher = Node(
-        package="image_transport",
-        executable="republish",
-        name="image_compressed_republisher",
-        output="screen",
-        arguments=["raw", "compressed"],
-        remappings=[
-            ("in",  "/camera/image_raw"),
-            ("out/compressed", "/camera/image_raw/compressed"),
-        ],
+    package='image_transport',
+    executable='republish',
+    name='image_compressed_republisher',
+    arguments=[
+        'raw',
+        'compressed',
+        '--ros-args',
+        '-r', 'in:=/camera/image_raw',
+        '-r', 'out:=/camera/image_raw/compressed'
+    ],
+    output='screen'
     )
 
-    # -----------------------------------------------------------------------
-    # Assemble LaunchDescription
-    # -----------------------------------------------------------------------
-    return LaunchDescription(
-        [
-            # Arguments
-            use_sim_time_arg,
-            slam_arg,
-            slam_params_arg,
-            camera_device_arg,
+    # -------------------------------
+    # RETURN LAUNCH DESCRIPTION
+    # -------------------------------
+    return LaunchDescription([
 
-            # Info banner
-            LogInfo(msg="=== TurtleBot3 Waffle Pi — ROS 2 Humble — Full Launch ==="),
+        # ---- Arguments ----
+        DeclareLaunchArgument('namespace', default_value=''),
+        DeclareLaunchArgument('usb_port', default_value='/dev/ttyACM0'),
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
 
-            # Nodes
-            robot_state_publisher,
-            turtlebot3_node,
-            lidar_node,
-            camera_node,
-            slam_toolbox_node,
-            image_compressed_republisher,
-        ]
-    )
+        DeclareLaunchArgument('camera', default_value='0'),
+        DeclareLaunchArgument('width', default_value='640'),
+        DeclareLaunchArgument('height', default_value='480'),
+        DeclareLaunchArgument('format', default_value=''),
+        DeclareLaunchArgument('use_image_view', default_value='false'),
+
+        # ---- Namespace ----
+        PushRosNamespace(namespace),
+
+        # ---- Robot State Publisher ----
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                [ThisLaunchFileDir(), '/turtlebot3_state_publisher.launch.py']),
+            launch_arguments={'use_sim_time': use_sim_time}.items(),
+        ),
+
+        # ---- LiDAR ----
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                [lidar_pkg_dir, '/launch/', lidar_launch]),
+            launch_arguments={
+                'port': '/dev/ttyUSB0',
+                'frame_id': 'base_scan'
+            }.items(),
+        ),
+
+        # ---- TurtleBot3 Node ----
+        Node(
+            package='turtlebot3_node',
+            executable='turtlebot3_ros',
+            parameters=[tb3_param_dir],
+            arguments=['-i', usb_port],
+            output='screen'
+        ),
+
+        # ---- Camera Container ----
+        camera_container,
+        image_compressed_republisher,
+    ])
