@@ -9,6 +9,7 @@ Launches:
   - Raspberry Pi Camera v2 (via v4l2_camera)
   - IMU + base sensors (turtlebot3_node)
   - SLAM Toolbox (online async mode)
+  - Image compressed republisher (image_transport)
 
 Usage:
   ros2 launch turtlebot3_waffle_pi_launch.py
@@ -28,7 +29,7 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -78,14 +79,15 @@ def generate_launch_description() -> LaunchDescription:
     urdf_file = pkg_file(
         "turtlebot3_description", "urdf", "turtlebot3_waffle_pi.urdf"
     )
-    with open(urdf_file, "r") as f:
-        robot_description = f.read()
+    robot_description = Command(["cat ", urdf_file])
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         name="robot_state_publisher",
         output="screen",
+        respawn=True,
+        respawn_delay=2.0,
         parameters=[
             {
                 "use_sim_time": use_sim_time,
@@ -148,6 +150,8 @@ def generate_launch_description() -> LaunchDescription:
             {
                 "video_device": camera_device,
                 "image_size": [640, 480],
+                "image_width": 640,
+                "image_height": 480,
                 "camera_frame_id": "camera_rgb_optical_frame",
                 "pixel_format": "YUYV",
                 "use_sim_time": use_sim_time,
@@ -176,6 +180,23 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # -----------------------------------------------------------------------
+    # 6. Image Compressed Republisher  (image_transport)
+    #    Subscribes: /camera/image_raw  (raw)
+    #    Publishes:  /camera/image_raw/compressed  (compressed)
+    # -----------------------------------------------------------------------
+    image_compressed_republisher = Node(
+        package="image_transport",
+        executable="republish",
+        name="image_compressed_republisher",
+        output="screen",
+        arguments=["raw", "compressed"],
+        remappings=[
+            ("in",  "/camera/image_raw"),
+            ("out/compressed", "/camera/image_raw/compressed"),
+        ],
+    )
+
+    # -----------------------------------------------------------------------
     # Assemble LaunchDescription
     # -----------------------------------------------------------------------
     return LaunchDescription(
@@ -195,5 +216,6 @@ def generate_launch_description() -> LaunchDescription:
             lidar_node,
             camera_node,
             slam_toolbox_node,
+            image_compressed_republisher,
         ]
     )
