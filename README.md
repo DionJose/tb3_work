@@ -35,7 +35,10 @@ source install/setup.bash
 ## Launching Arena World
 ```
 cd ~/ros2_ws
-ros2 launch turtlebot3_task turtlebot3_world.py red_marker:=<AruCo marker> blue_marker:=<AruCo marker>
+ros2 launch turtlebot3_task turtlebot3_world.py \
+	marker_north:=7 marker_south:=42 \
+	marker_east:=23 marker_west:=0 \
+	red_marker:=<AruCo marker> blue_marker:=<AruCo marker>
 ```
 Available AruCo markers are 0 (W), 7 (N), 23 (E), 42 (S).  
 
