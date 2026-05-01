@@ -1,70 +1,29 @@
 #!/usr/bin/env python3
+"""
+block_wall_detection.py
+-----------------------
+Vision utilities: ArUco marker detection and block colour detection.
+No ROS node — pure OpenCV logic called by the main node.
+"""
 import cv2
 import cv2.aruco as aruco
 import numpy as np
 
-class GazeboVisionNode(Node):
-    def __init__(self):
-        super().__init__('gazebo_vision_node')
-        
-        # 1. ROS2 Setup
-        # Gazebo TurtleBot3 camera topic is usually /camera/image_raw
-        self.subscription = self.create_subscription(
-            Image,
-            '/camera/image_raw', 
-            self.image_callback,
-            10)
-        self.bridge = CvBridge()
 
-        self.block_pub = self.create_publisher(Point, '/block_info', 10)
+# HSV ranges (tuned for Gazebo Classic rendering)
+_RED_LO1  = np.array([0,   150, 50])
+_RED_HI1  = np.array([10,  255, 255])
+_RED_LO2  = np.array([160, 150, 50])
+_RED_HI2  = np.array([180, 255, 255])
+_BLUE_LO  = np.array([100, 150, 50])
+_BLUE_HI  = np.array([130, 255, 255])
 
-        # 2. ArUco Setup (Your version-compatible logic)
-        try:
-            self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-            self.parameters = aruco.DetectorParameters()
-            self.detector = aruco.ArucoDetector(self.aruco_dict, self.parameters)
-            print("Using Modern ArUco Detector")
-        except AttributeError:
-            self.aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)
-            self.parameters = aruco.DetectorParameters_create()
-            self.detector = None
-            print("Using Legacy ArUco Detector")
-
-    def image_callback(self, msg):
-        # Convert the Gazebo image to an OpenCV frame
-        frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-        
-        # --- YOUR EXACT VALUES AND LOGIC ---
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        frame_area = frame.shape[0] * frame.shape[1]
-        min_area = frame_area * 0.002
-
-        # Blue Mask
-        lower_blue = np.array([100, 100, 50]) 
-        upper_blue = np.array([130, 255, 255])
-        mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-
-        # # Red Mask
-        # lower_red = np.array([165, 150, 70]) 
-        # upper_red = np.array([180, 255, 255])
-        # mask_red = cv2.inRange(hsv, lower_red, upper_red)
-
-        # Red Mask - Range 1 (Wrap-around start)
-        lower_red_low = np.array([0, 80, 50])
-        upper_red_low = np.array([10, 255, 255])
-        mask_red_low = cv2.inRange(hsv, lower_red_low, upper_red_low)
-
-        # Red Mask - Range 2 (Wrap-around end)
-        lower_red_high = np.array([160, 80, 50]) # Lowered from 165 to be more inclusive
-        upper_red_high = np.array([180, 255, 255])
-        mask_red_high = cv2.inRange(hsv, lower_red_high, upper_red_high)
-
-# TIGHTENED: Lower area threshold to catch blocks at a distance
-_MIN_BLOCK_AREA = 400 
+# Minimum contour area to count as a real block (pixels²)
+_MIN_BLOCK_AREA = 600
 
 # ArUco marker width (pixels) above which the robot is "too close"
-_TOO_CLOSE_WIDTH = 140
+_TOO_CLOSE_WIDTH = 240
+
 
 class VisionHelper:
     def __init__(self):
@@ -73,6 +32,14 @@ class VisionHelper:
         self.detector = aruco.ArucoDetector(aruco_dict, params)
 
     def analyse(self, frame):
+        """
+        Analyse one BGR frame and return a dict:
+          marker_id  : int or None   — first detected ArUco ID
+          too_close  : bool          — marker is filling >140px wide
+          color      : str or None   — 'red' | 'blue'
+          center_x   : int or None   — horizontal centroid of block (pixels)
+          frame_w    : int           — frame width (for normalisation)
+        """
         h, w = frame.shape[:2]
         result = {
             'marker_id': None,
@@ -82,64 +49,39 @@ class VisionHelper:
             'frame_w':    w,
         }
 
-        # ArUco Detection
+        # ── ArUco ──────────────────────────────────────────────────────────
         corners, ids, _ = self.detector.detectMarkers(frame)
         if ids is not None:
-            aruco.drawDetectedMarkers(frame, corners, ids)
-            for i, marker_id in enumerate(ids):
-                cv2.putText(frame, f"WALL ID: {marker_id[0]}", (10, 50 + i*35), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            result['marker_id'] = int(ids[0][0])
+            width_px = float(np.linalg.norm(
+                corners[0][0][0] - corners[0][0][1]))
+            result['too_close'] = width_px > _TOO_CLOSE_WIDTH
 
-        # --- TARGETING: DRAW BOXES ---
-        # Blue
-        blue_cnts, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in blue_cnts:
-            if cv2.contourArea(cnt) > min_area: # Lowered for Gazebo distance
-                x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        # ── Colour (lower half only — ignore walls/ceiling) ────────────────
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        half = h // 2
 
-                msg = Point()
-                msg.x = float(x + w//2) # Horizontal center
-                msg.y = float(cv2.contourArea(cnt)) # Using area as a "distance" proxy
-                msg.z = 2.0 # 2 for blue
-                self.block_pub.publish(msg)
+        mask_r = cv2.add(
+            cv2.inRange(hsv, _RED_LO1, _RED_HI1),
+            cv2.inRange(hsv, _RED_LO2, _RED_HI2))
+        mask_b = cv2.inRange(hsv, _BLUE_LO, _BLUE_HI)
 
-                # PRINT COORDINATES TO TERMINAL
-                print(f"BLUE CUBE detected at X: {x + w//2}")
+        for mask in (mask_r, mask_b):
+            mask[:half, :] = 0
 
-        # Red
-        red_cnts, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in red_cnts:
-            if cv2.contourArea(cnt) > min_area:
-                x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+        for color, mask in (('red', mask_r), ('blue', mask_b)):
+            cnts, _ = cv2.findContours(
+                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
+            best = max(cnts, key=cv2.contourArea)
+            if cv2.contourArea(best) < _MIN_BLOCK_AREA:
+                continue
+            M = cv2.moments(best)
+            if M['m00'] == 0:
+                continue
+            result['color']    = color
+            result['center_x'] = int(M['m10'] / M['m00'])
+            break   # largest colour wins; red checked first
 
-                msg = Point()
-                msg.x = float(x + w//2) # Horizontal center
-                msg.y = float(cv2.contourArea(cnt)) # Using area as a "distance" proxy
-                msg.z = 1.0 # 1 for blue
-                self.block_pub.publish(msg)
-
-                # PRINT COORDINATES TO TERMINAL
-                print(f"RED CUBE detected at X: {x + w//2}")
-
-        # --- DISPLAY ---
-        cv2.imshow('Gazebo Robot View', frame)
-        cv2.imshow('Red Mask', mask_red)
-        cv2.imshow('Blue Mask', mask_blue)
-        cv2.waitKey(1)
-#hello
-def main(args=None):
-    rclpy.init(args=args)
-    node = GazeboVisionNode()
-    print("Vision Node Started. Waiting for Gazebo camera feed...")
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    node.destroy_node()
-    rclpy.shutdown()
-    cv2.destroyAllWindows()
-
-if __name__ == '__main__':
-    main()
+        return result
