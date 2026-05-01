@@ -148,12 +148,12 @@ def generate_launch_description():
                 )
    	    ),
    	    launch_arguments={'use_sim_time': use_sim_time}.items(),
-	)
+	),
 
         # ---- LiDAR ----
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                [lidar_pkg_dir, '/launch/', lidar_launch]),
+                os.path.join(lidar_pkg_dir, lidar_launch)),
             launch_arguments={
                 'port': '/dev/ttyUSB0',
                 'frame_id': 'base_scan'
