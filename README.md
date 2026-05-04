@@ -50,5 +50,29 @@ ros2 param get /competition_logic (blue/red_goal_id)
 ```
 it will tell you which marker has been assigned that colour 
 
+## Running Commands on the Turtlebot
+First ssh into the robot
+```
+ssh tb@1100.127.105.110
+```
+### Camera and LiDAR
+To run the camera, and make it run smoothly
+```
+ros2 launch turtlebot3_bringup camera.launch.py format:=YUYV width:=320 height:=240
+```
+or
+```
+ros2 launch turtlebot3_bringup camera.launch.py format:=YUYV width:=160 height:=120
+```
+, then to run the lidar sensor
+```
+ros2 launch turtlebot3_bringup robot.launch.py
+```
+
+### Executables
+To run our file, do it on the VM
+```
+ros2 run turtlebot3_task inshallah.py
+```
 ## Note:
 All executable code goes to the turtlebot3_task folder, any worlds into worlds folder, models into models, etc. (look in the turtlebot3_gazebo folder for an example).
