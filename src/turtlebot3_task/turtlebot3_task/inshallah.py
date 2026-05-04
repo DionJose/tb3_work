@@ -19,7 +19,7 @@ import math
 import rclpy
 import rclpy.duration
 from rclpy.node import Node
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import CompressedImage, LaserScan, Image
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
@@ -73,7 +73,7 @@ class BlockSorter(Node):
         self.blue_marker_id = self.get_parameter('blue_marker').value
 
         # Subs / pubs
-        self.create_subscription(Image, '/camera/image_raw', self.image_cb, 10)
+        self.create_subscription(CompressedImage, '/camera/image_raw/compressed', self.image_cb, 10)
         self.create_subscription(LaserScan, '/scan', self.scan_cb, 10)
         self.create_subscription(Odometry, '/odom', self.odom_cb, 10)
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -172,7 +172,7 @@ class BlockSorter(Node):
         self.full_scan_angle_inc = msg.angle_increment
 
     def image_cb(self, msg):
-        frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+        frame = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
         self.frame_width = frame.shape[1]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
