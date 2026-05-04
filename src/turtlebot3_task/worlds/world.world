@@ -265,7 +265,7 @@
           </surface>
         </collision>
       </link>
-    </model>
+    </model> -->
 
     <model name="v3_block_blue_se">
       <static>0</static>
