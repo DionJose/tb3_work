@@ -173,22 +173,22 @@ class BlockSorter(Node):
 
     def image_cb(self, msg):
         frame = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
-        frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=30)
+        # frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=30)
         self.frame_width = frame.shape[1]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # ----- COLOUR MASKS (DO NOT CHANGE THESE NUMBERS) -------------------
-        mask_blue = cv2.inRange(hsv, np.array([90, 60, 20]), np.array([140, 255, 255]))
+        mask_blue = cv2.inRange(hsv, np.array([110, 150, 50]), np.array([125, 255, 255]))
         mask_red_low = cv2.inRange(hsv, np.array([0, 60, 30]), np.array([15, 255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
         mask_red = cv2.bitwise_or(mask_red_low, mask_red_high)
         # --------------------------------------------------------------------
 
-        kernel = np.ones((5, 5), np.uint8)
-        mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_OPEN, kernel)
-        mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_CLOSE, kernel)
-        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
-        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel)
+        # kernel = np.ones((5, 5), np.uint8)
+        # mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_OPEN, kernel)
+        # mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_CLOSE, kernel)
+        # mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
+        # mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel)
 
         self.red_blocks_pixel = self._extract_blocks(mask_red)
         self.blue_blocks_pixel = self._extract_blocks(mask_blue)
