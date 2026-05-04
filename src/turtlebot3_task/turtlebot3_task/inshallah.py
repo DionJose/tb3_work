@@ -217,6 +217,19 @@ class BlockSorter(Node):
             cv2.putText(frame, f'RED side: X{">"if self.red_side_x_sign>0 else "<"} 0',
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
 
+        # Log correctly-placed blocks (once per cycle, not every frame)
+        if self.sides_known:
+            for cx, area, *_ in self.red_blocks_pixel:
+                wx, _ = self.estimate_block_world_xy(cx)
+                if self.is_correct_side('red', wx):
+                    self.get_logger().info('RED block in correct place', throttle_duration_sec=2.0)
+                    break
+            for cx, area, *_ in self.blue_blocks_pixel:
+                wx, _ = self.estimate_block_world_xy(cx)
+                if self.is_correct_side('blue', wx):
+                    self.get_logger().info('BLUE block in correct place', throttle_duration_sec=2.0)
+                    break
+
         cv2.imshow('Robot View', frame)
         cv2.waitKey(1)
 
@@ -415,7 +428,7 @@ class BlockSorter(Node):
             return
         self._publish_cmd(APPROACH_SPEED_NEAR, 0.0)
 
-    # ----- ALIGN_TO_MARKER --------------------------------------------------
+    # ----- ALIGN_TO_MARKER ----------------------------------  ----------------
     def _do_align_to_marker(self):
         # Is the target marker visible?
         if self.align_marker_id in self.detected_marker_pixels:
