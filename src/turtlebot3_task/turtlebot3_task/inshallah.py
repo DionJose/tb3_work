@@ -142,6 +142,7 @@ class BlockSorter(Node):
         self.release_start_time = None
 
         # Verify done
+        self._search_slowdown_start = None
         self.verify_spin_accumulated = 0.0
         self.verify_spin_last_yaw = None
         self.verify_saw_misplaced = False
@@ -190,8 +191,10 @@ class BlockSorter(Node):
         # mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
         # mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel)
 
-        self.red_blocks_pixel = self._extract_blocks(mask_red)
-        self.blue_blocks_pixel = self._extract_blocks(mask_blue)
+        self.red_blocks_pixel = [b for b in self._extract_blocks(mask_red)
+                                  if self._is_inside_arena(b[0])]
+        self.blue_blocks_pixel = [b for b in self._extract_blocks(mask_blue)
+                                   if self._is_inside_arena(b[0])]
 
         for cx, area, x, y, w, h in self.red_blocks_pixel:
             cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
@@ -307,6 +310,25 @@ class BlockSorter(Node):
         """Return the smallest valid range across the full 360° LiDAR scan."""
         valid = [r for r in self.full_scan_ranges if 0.05 < r < 10.0]
         return min(valid) if valid else 10.0
+    
+    def _is_inside_arena(self, pixel_cx, max_distance=3.0):
+        """Use LiDAR to check if a detected contour is within arena range.
+        Rejects coloured contours that are too far away to plausibly be in the arena."""
+        if not self.full_scan_ranges:
+            return True  # don't filter if no LiDAR yet
+        FOV_RAD = math.radians(60.0)
+        cam_bearing = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
+        # Convert camera-frame bearing to LiDAR index
+        lidar_angle = -cam_bearing
+        idx = int(round((lidar_angle - self.full_scan_angle_min) / self.full_scan_angle_inc))
+        idx = idx % len(self.full_scan_ranges)
+        # Average over a few rays for robustness
+        indices = [(idx + d) % len(self.full_scan_ranges) for d in range(-3, 4)]
+        valid = [self.full_scan_ranges[i] for i in indices
+                 if 0.05 < self.full_scan_ranges[i] < 100.0]
+        if not valid:
+            return False
+        return min(valid) < max_distance
 
     def _bearing_of_nearest_obstacle(self):
         """Return bearing (radians, in robot frame) of the closest LiDAR return."""
@@ -353,6 +375,19 @@ class BlockSorter(Node):
     def _do_searching(self):
         target = self._pick_misplaced_block()
         if target is not None:
+            # When a misplaced block is spotted, slow the spin briefly
+            # so camera lag-induced offset error settles before we transition.
+            if self._search_slowdown_start is None:
+                self._search_slowdown_start = self.get_clock().now()
+                self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED * 0.3)
+                return
+            elapsed = (self.get_clock().now() - self._search_slowdown_start).nanoseconds * 1e-9
+            if elapsed < 0.8:
+                self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED * 0.3)
+                return
+
+            # Done slowing — commit to the target
+            self._search_slowdown_start = None
             self.target_colour = target[0]
             self.last_target_area = target[2]
             self.last_target_offset = target[1] - self.frame_width / 2.0
@@ -361,6 +396,9 @@ class BlockSorter(Node):
             self.get_logger().info(f'Target acquired: misplaced {self.target_colour} block.')
             self.state = 'APPROACHING'
             return
+
+        # Nothing visible — reset slowdown timer and continue normal spin
+        self._search_slowdown_start = None
         self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED)
 
     def _pick_misplaced_block(self):
@@ -395,7 +433,11 @@ class BlockSorter(Node):
             self.get_logger().info(f'tracking: area={area:.0f} offset={offset:.0f}')
 
             speed = APPROACH_SPEED_NEAR if area > NEAR_AREA_THRESHOLD else APPROACH_SPEED_FAR
-            angular = -ALIGN_GAIN * offset
+            # Reduce steering as block gets close — by then you should already be aligned
+            gain_scale = 1.0 if area < NEAR_AREA_THRESHOLD else 0.3
+            # Deadband — don't react to small offsets that might be lag artefacts
+            steering_offset = offset if abs(offset) >= 30 else 0
+            angular = -ALIGN_GAIN * steering_offset * gain_scale
             self._publish_cmd(speed, angular)
             return
 
