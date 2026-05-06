@@ -185,13 +185,14 @@ class BlockSorter(Node):
     def image_cb(self, msg):
         frame = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
         self.frame_width = frame.shape[1]
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        frame_bright = cv2.convertScaleAbs(frame, alpha=1.0, beta=40)
+        hsv = cv2.cvtColor(frame_bright, cv2.COLOR_BGR2HSV)
 
         # ----- COLOUR MASKS -------------------------------------------------
         # Blue: widened to [100, 130] hue and lowered saturation to 100
         # to catch darker/shadowed blue blocks
         mask_blue = cv2.inRange(
-            hsv, np.array([110, 150, 50]), np.array([125, 255, 255]))
+            hsv, np.array([110, 50, 10]), np.array([145, 255, 255]))
 
         mask_red_low  = cv2.inRange(hsv, np.array([0,   60, 30]), np.array([15,  255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
@@ -202,36 +203,36 @@ class BlockSorter(Node):
         self.blue_blocks_pixel = self._extract_blocks(mask_blue)
 
         for cx, area, x, y, w, h in self.red_blocks_pixel:
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+            cv2.rectangle(frame_bright, (x, y), (x+w, y+h), (0, 0, 255), 2)
         for cx, area, x, y, w, h in self.blue_blocks_pixel:
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            cv2.rectangle(frame_bright, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
         if self.aruco_detector:
-            corners, ids, _ = self.aruco_detector.detectMarkers(frame)
+            corners, ids, _ = self.aruco_detector.detectMarkers(frame_bright)
         else:
             corners, ids, _ = aruco.detectMarkers(
-                frame, self.aruco_dict, parameters=self.aruco_params)
+                frame_bright, self.aruco_dict, parameters=self.aruco_params)
 
         self.detected_marker_pixels = {}
         self.detected_marker_widths = {}
         if ids is not None:
-            aruco.drawDetectedMarkers(frame, corners, ids)
+            aruco.drawDetectedMarkers(frame_bright, corners, ids)
             for i, mid in enumerate(ids.flatten()):
                 pts = corners[i].reshape(-1, 2)
                 self.detected_marker_pixels[int(mid)] = float(pts[:, 0].mean())
                 self.detected_marker_widths[int(mid)] = float(
                     pts[:, 0].max() - pts[:, 0].min())
 
-        cv2.putText(frame, f'STATE: {self.state}', (10, 30),
+        cv2.putText(frame_bright, f'STATE: {self.state}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f'POS: ({self.robot_x:.2f}, {self.robot_y:.2f})',
+        cv2.putText(frame_bright, f'POS: ({self.robot_x:.2f}, {self.robot_y:.2f})',
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
         if self.sides_known:
-            cv2.putText(frame,
+            cv2.putText(frame_bright,
                         f'RED: X{">" if self.red_side_x_sign > 0 else "<"}0',
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
 
-        cv2.imshow('Robot View', frame)
+        cv2.imshow('Robot View', frame_bright)
         cv2.waitKey(1)
 
     def _extract_blocks(self, mask):
