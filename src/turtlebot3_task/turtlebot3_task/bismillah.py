@@ -4,14 +4,14 @@
 Sort coloured blocks into their correct half of the arena by pushing.
 
 Strategy:
-  INIT_SPIN            - full 360°, resolve sides from marker IDs
+  INIT_SPIN            - full 360°, record world bearings of all visible markers
   SEARCHING            - spin until a misplaced block is visible
   APPROACHING          - drive at the closest misplaced block
   CAPTURE_PUSH         - block disappeared under camera; drive forward briefly
   ALIGN_TO_MARKER      - spin until target marker is centred in frame
   RECOVERY_REPOSITION  - if marker not found, move to open space and retry
   CARRY_TO_MARKER      - drive forward, visual servoing on the marker
-  RELEASE              - reverse 0.30m to leave the block deposited
+  RELEASE              - reverse to leave the block deposited
   VERIFY_DONE          - full 360° check; resume or finish
   DONE
 """
@@ -55,7 +55,7 @@ RECOVERY_MAX_ATTEMPTS   = 2
 RELEASE_REVERSE_SPEED   = 0.10
 RELEASE_REVERSE_TIME    = 4.5
 
-SEARCH_ANGULAR_SPEED    = 0.4
+SEARCH_ANGULAR_SPEED    = 0.25      # slowed from 0.4 to combat camera lag
 INIT_SPIN_ANGULAR_SPEED = 0.4
 ALIGN_GAIN              = 0.005
 SAFE_FRONT_STOP         = 0.18
@@ -105,7 +105,7 @@ class BlockSorter(Node):
         self.blue_blocks_pixel = []
         self.detected_marker_pixels = {}
         self.detected_marker_widths = {}
-        self.marker_world_bearings = {}    # NEW: id -> world-frame bearing (radians) when last seen
+        self.marker_world_bearings = {}    # id -> world-frame bearing recorded when marker last seen
 
         # Side resolution
         self.red_side_x_sign = None
@@ -142,6 +142,9 @@ class BlockSorter(Node):
         # Release
         self.release_start_time = None
 
+        # Search slowdown
+        self._search_slowdown_start = None
+
         # Verify done
         self.verify_spin_accumulated = 0.0
         self.verify_spin_last_yaw = None
@@ -177,7 +180,7 @@ class BlockSorter(Node):
         self.frame_width = frame.shape[1]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # ----- COLOUR MASKS (DO NOT CHANGE THESE NUMBERS) -------------------
+        # ----- COLOUR MASKS -------------------------------------------------
         mask_blue = cv2.inRange(hsv, np.array([110, 150, 50]), np.array([125, 255, 255]))
         mask_red_low = cv2.inRange(hsv, np.array([0, 60, 30]), np.array([15, 255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
@@ -202,7 +205,7 @@ class BlockSorter(Node):
         self.detected_marker_widths = {}
         if ids is not None:
             aruco.drawDetectedMarkers(frame, corners, ids)
-            FOV_RAD = math.radians(60.0)                       # NEW
+            FOV_RAD = math.radians(60.0)
             for i, mid in enumerate(ids.flatten()):
                 pts = corners[i].reshape(-1, 2)
                 cx_marker = float(pts[:, 0].mean())
@@ -210,7 +213,7 @@ class BlockSorter(Node):
                 self.detected_marker_pixels[int(mid)] = cx_marker
                 self.detected_marker_widths[int(mid)] = width_marker
 
-                # NEW: record world-frame bearing of this marker
+                # Record world-frame bearing of this marker
                 cam_bearing = (cx_marker - self.frame_width / 2.0) / self.frame_width * FOV_RAD
                 self.marker_world_bearings[int(mid)] = self.robot_yaw - cam_bearing
 
@@ -219,12 +222,9 @@ class BlockSorter(Node):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(frame, f'POS: ({self.robot_x:.2f}, {self.robot_y:.2f})',
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-        if self.sides_known:
-            cv2.putText(frame, f'RED side: X{">"if self.red_side_x_sign>0 else "<"} 0',
-                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
 
-        # CHANGED: log correctly-placed blocks using world bearing
-        if self.sides_known:
+        # Log correctly-placed blocks (once per cycle, not every frame)
+        if self.sides_known and self.state != 'INIT_SPIN':
             for cx, area, *_ in self.red_blocks_pixel:
                 bearing = self.block_world_bearing(cx)
                 if self.is_correct_side('red', bearing):
@@ -266,17 +266,16 @@ class BlockSorter(Node):
             return
         self.sides_known = True
         self.get_logger().info(
-            f'Sides resolved: red is X{"+" if self.red_side_x_sign>0 else "-"}'
+            f'Sides resolved: red marker is id={self.red_marker_id}'
         )
 
-    # CHANGED: now takes a world-frame bearing instead of world_x
     def is_correct_side(self, colour, block_world_bearing):
         """Decide if a block is on the correct side, by comparing its world bearing
         to the world bearings of the red and blue markers."""
         red_b = self.marker_world_bearings.get(self.red_marker_id)
         blue_b = self.marker_world_bearings.get(self.blue_marker_id)
         if red_b is None or blue_b is None:
-            return True  # not enough data yet
+            return True  # not enough data yet — don't classify
 
         def ang_diff(a, b):
             d = (a - b + math.pi) % (2 * math.pi) - math.pi
@@ -288,20 +287,11 @@ class BlockSorter(Node):
             return d_red < d_blue
         return d_blue < d_red
 
-    # NEW: compute a block's world-frame bearing from camera pixel x
     def block_world_bearing(self, pixel_cx):
+        """World-frame bearing of a block at given camera pixel x."""
         FOV_RAD = math.radians(60.0)
         cam_bearing = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
         return self.robot_yaw - cam_bearing
-
-    # KEPT: still here in case anything else uses it, but no longer used in classification
-    def estimate_block_world_xy(self, pixel_cx):
-        FOV_RAD = math.radians(60.0)
-        bearing = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
-        distance = max(0.2, min(self.front_dist, 2.0))
-        bx = self.robot_x + distance * math.cos(self.robot_yaw - bearing)
-        by = self.robot_y + distance * math.sin(self.robot_yaw - bearing)
-        return bx, by
 
     def _accumulate_yaw_change(self, last_yaw_attr, accum_attr):
         last = getattr(self, last_yaw_attr)
@@ -365,8 +355,32 @@ class BlockSorter(Node):
         self._publish_cmd(0.0, INIT_SPIN_ANGULAR_SPEED)
 
     def _do_searching(self):
+        # Log misplaced blocks visible during searching (throttled)
+        for cx, area, *_ in self.red_blocks_pixel:
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('red', bearing):
+                self.get_logger().info('MISPLACED RED block detected', throttle_duration_sec=2.0)
+                break
+        for cx, area, *_ in self.blue_blocks_pixel:
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('blue', bearing):
+                self.get_logger().info('MISPLACED BLUE block detected', throttle_duration_sec=2.0)
+                break
+
         target = self._pick_misplaced_block()
         if target is not None:
+            # Slow the spin briefly when block sighted, to let camera catch up
+            if self._search_slowdown_start is None:
+                self._search_slowdown_start = self.get_clock().now()
+                self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED * 0.3)
+                return
+            elapsed = (self.get_clock().now() - self._search_slowdown_start).nanoseconds * 1e-9
+            if elapsed < 1.5:
+                self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED * 0.3)
+                return
+
+            # Done slowing — commit to the target
+            self._search_slowdown_start = None
             self.target_colour = target[0]
             self.last_target_area = target[2]
             self.last_target_offset = target[1] - self.frame_width / 2.0
@@ -375,9 +389,11 @@ class BlockSorter(Node):
             self.get_logger().info(f'Target acquired: misplaced {self.target_colour} block.')
             self.state = 'APPROACHING'
             return
+
+        # No target — full speed search
+        self._search_slowdown_start = None
         self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED)
 
-    # CHANGED: classify using bearing instead of estimated world XY
     def _pick_misplaced_block(self):
         candidates = []
         for cx, area, *_ in self.red_blocks_pixel:
@@ -409,7 +425,11 @@ class BlockSorter(Node):
             self.get_logger().info(f'tracking: area={area:.0f} offset={offset:.0f}')
 
             speed = APPROACH_SPEED_NEAR if area > NEAR_AREA_THRESHOLD else APPROACH_SPEED_FAR
-            angular = -ALIGN_GAIN * offset
+            # Reduce steering as block gets close — by then we should already be aligned
+            gain_scale = 1.0 if area < NEAR_AREA_THRESHOLD else 0.3
+            # Deadband: don't react to small offsets that may just be lag artefacts
+            steering_offset = offset if abs(offset) >= 30 else 0
+            angular = -ALIGN_GAIN * steering_offset * gain_scale
             self._publish_cmd(speed, angular)
             return
 
@@ -547,6 +567,18 @@ class BlockSorter(Node):
         self._publish_cmd(-RELEASE_REVERSE_SPEED, 0.0)
 
     def _do_verify_done(self):
+        # Log misplaced blocks during verify spin (throttled)
+        for cx, area, *_ in self.red_blocks_pixel:
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('red', bearing):
+                self.get_logger().info('MISPLACED RED block detected', throttle_duration_sec=2.0)
+                break
+        for cx, area, *_ in self.blue_blocks_pixel:
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('blue', bearing):
+                self.get_logger().info('MISPLACED BLUE block detected', throttle_duration_sec=2.0)
+                break
+
         if self._pick_misplaced_block() is not None:
             self.verify_saw_misplaced = True
         accum = self._accumulate_yaw_change('verify_spin_last_yaw', 'verify_spin_accumulated')
