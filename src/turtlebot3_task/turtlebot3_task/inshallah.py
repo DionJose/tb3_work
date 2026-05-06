@@ -174,7 +174,7 @@ class BlockSorter(Node):
 
     def image_cb(self, msg):
         frame = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
-        # frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=30)
+        frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=30)
         self.frame_width = frame.shape[1]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
