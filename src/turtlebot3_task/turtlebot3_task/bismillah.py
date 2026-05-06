@@ -3,7 +3,7 @@
 Sort coloured blocks into their correct half of the arena by pushing.
 
 Strategy:
-  INIT_SPIN            - full 360°, resolve sides from marker IDs
+  INIT_SPIN            - full 360°, record world bearings of all visible markers
   SEARCHING            - spin until a misplaced block is visible
   APPROACHING          - drive at the closest misplaced block
   CAPTURE_PUSH         - block disappeared under camera; drive forward briefly
@@ -16,24 +16,17 @@ Strategy:
 
 Side classification
 -------------------
-Uses robot odometry (x position) + LiDAR front distance to estimate the
-block's world x coordinate directly.  A block with estimated world_x > 0
-is on the right side of the arena (east); world_x < 0 is on the left (west).
+Uses bearing-based classification: during init spin (and ongoing), every
+ArUco marker the camera detects has its WORLD-FRAME bearing recorded
+(i.e. the absolute compass direction from the robot to the marker, using
+robot_yaw from odometry).  When a coloured block is detected, its world
+bearing is compared to the stored marker bearings.  A block whose bearing
+is closer to the red marker's bearing is on the red side; closer to the
+blue marker's bearing is on the blue side.
 
-red_marker=23  → east wall  → red blocks belong at world_x > 0
-red_marker=0   → west wall  → red blocks belong at world_x < 0
-
-This replaces the previous bearing-proximity approach which was unreliable
-because angular closeness to a marker does not imply physical closeness,
-and stale marker bearings after the robot repositions caused misclassification.
-
-Unclassified / edge cases
--------------------------
-- If sides_known is False (marker ID not 23 or 0): all blocks treated as
-  correctly placed (logged as error, robot halts after INIT_SPIN).
-- If a block's estimated world_x is within SIDE_DEADBAND of 0 (on or very
-  near the centre line): treated as CORRECT so the robot doesn't obsessively
-  push blocks that are already close enough to count for marks.
+This works regardless of where the robot starts in the arena and which
+direction it is facing — only the init spin needs to see both markers,
+which it does by spinning a full 360° before any classification matters.
 """
 import math
 import rclpy
@@ -79,10 +72,6 @@ SEARCH_ANGULAR_SPEED    = 0.25
 INIT_SPIN_ANGULAR_SPEED = 0.4
 ALIGN_GAIN              = 0.005
 SAFE_FRONT_STOP         = 0.18
-
-# Blocks within this distance of x=0 are treated as correctly placed.
-# The competition gives marks for >=1 cm overlap, so 0.05 m is conservative.
-SIDE_DEADBAND           = 0.05
 # ----------------------------------------------------------------------------
 
 
@@ -125,9 +114,8 @@ class BlockSorter(Node):
         self.blue_blocks_pixel      = []
         self.detected_marker_pixels = {}
         self.detected_marker_widths = {}
+        self.marker_world_bearings  = {}    # id -> world-frame bearing recorded when marker last seen
 
-        # Side assignment: +1 means red belongs at world_x > 0 (east/right)
-        #                  -1 means red belongs at world_x < 0 (west/left)
         self.red_side_x_sign = None
         self.sides_known     = False
 
@@ -189,11 +177,8 @@ class BlockSorter(Node):
         hsv = cv2.cvtColor(frame_bright, cv2.COLOR_BGR2HSV)
 
         # ----- COLOUR MASKS -------------------------------------------------
-        # Blue: widened to [100, 130] hue and lowered saturation to 100
-        # to catch darker/shadowed blue blocks
         mask_blue = cv2.inRange(
             hsv, np.array([110, 50, 10]), np.array([145, 255, 255]))
-
         mask_red_low  = cv2.inRange(hsv, np.array([0,   60, 30]), np.array([15,  255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
         mask_red = cv2.bitwise_or(mask_red_low, mask_red_high)
@@ -217,20 +202,47 @@ class BlockSorter(Node):
         self.detected_marker_widths = {}
         if ids is not None:
             aruco.drawDetectedMarkers(frame_bright, corners, ids)
+            FOV_RAD = math.radians(60.0)
             for i, mid in enumerate(ids.flatten()):
                 pts = corners[i].reshape(-1, 2)
-                self.detected_marker_pixels[int(mid)] = float(pts[:, 0].mean())
-                self.detected_marker_widths[int(mid)] = float(
-                    pts[:, 0].max() - pts[:, 0].min())
+                cx_marker = float(pts[:, 0].mean())
+                width_marker = float(pts[:, 0].max() - pts[:, 0].min())
+                self.detected_marker_pixels[int(mid)] = cx_marker
+                self.detected_marker_widths[int(mid)] = width_marker
+
+                # Record world-frame bearing of this marker
+                cam_bearing = (cx_marker - self.frame_width / 2.0) / self.frame_width * FOV_RAD
+                self.marker_world_bearings[int(mid)] = self.robot_yaw - cam_bearing
 
         cv2.putText(frame_bright, f'STATE: {self.state}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(frame_bright, f'POS: ({self.robot_x:.2f}, {self.robot_y:.2f})',
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-        if self.sides_known:
-            cv2.putText(frame_bright,
-                        f'RED: X{">" if self.red_side_x_sign > 0 else "<"}0',
-                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+
+        # Diagnostic logging — every visible block, classified, throttled per colour
+        if self.sides_known and self.state != 'INIT_SPIN':
+            for cx, area, *_ in self.red_blocks_pixel:
+                bearing = self.block_world_bearing(cx)
+                if self.is_correct_side('red', bearing):
+                    self.get_logger().info(
+                        f'RED correct: pixel_cx={cx}, bearing={math.degrees(bearing):.1f}°',
+                        throttle_duration_sec=2.0)
+                else:
+                    self.get_logger().info(
+                        f'RED MISPLACED: pixel_cx={cx}, bearing={math.degrees(bearing):.1f}°',
+                        throttle_duration_sec=2.0)
+                break
+            for cx, area, *_ in self.blue_blocks_pixel:
+                bearing = self.block_world_bearing(cx)
+                if self.is_correct_side('blue', bearing):
+                    self.get_logger().info(
+                        f'BLUE correct: pixel_cx={cx}, bearing={math.degrees(bearing):.1f}°',
+                        throttle_duration_sec=2.0)
+                else:
+                    self.get_logger().info(
+                        f'BLUE MISPLACED: pixel_cx={cx}, bearing={math.degrees(bearing):.1f}°',
+                        throttle_duration_sec=2.0)
+                break
 
         cv2.imshow('Robot View', frame_bright)
         cv2.waitKey(1)
@@ -252,62 +264,40 @@ class BlockSorter(Node):
         if self.sides_known:
             return
         if self.red_marker_id == 23:
-            self.red_side_x_sign = +1   # east wall → red belongs at x > 0
+            self.red_side_x_sign = +1
         elif self.red_marker_id == 0:
-            self.red_side_x_sign = -1   # west wall → red belongs at x < 0
+            self.red_side_x_sign = -1
         else:
             self.get_logger().error(
-                f'red_marker={self.red_marker_id} must be 23 (east) or 0 (west).')
+                f'red_marker={self.red_marker_id} must be 23 or 0.')
             return
         self.sides_known = True
         self.get_logger().info(
-            f'Sides resolved: red belongs at world_x '
-            f'{">" if self.red_side_x_sign > 0 else "<"} 0')
+            f'Sides resolved: red marker is id={self.red_marker_id}')
 
-    def estimate_block_world_x(self, pixel_cx):
-        """
-        Estimate the world x-coordinate of a block at pixel_cx.
+    def is_correct_side(self, colour, block_world_bearing):
+        """Compare block's world bearing to red and blue marker bearings.
+        Block is on the correct side if its bearing is closer to its colour's marker."""
+        red_b  = self.marker_world_bearings.get(self.red_marker_id)
+        blue_b = self.marker_world_bearings.get(self.blue_marker_id)
+        if red_b is None or blue_b is None:
+            return True  # not enough data yet — don't classify
 
-        Uses the robot's current x position, its yaw, and the front LiDAR
-        distance as a range estimate.  The horizontal pixel offset from the
-        image centre gives a lateral offset from the robot's forward axis.
+        def ang_diff(a, b):
+            d = (a - b + math.pi) % (2 * math.pi) - math.pi
+            return abs(d)
 
-        This is approximate (assumes block is at front_dist range) but is
-        robust enough to classify left vs right reliably once the robot is
-        within ~0.5 m of the block.
-        """
-        FOV_RAD    = math.radians(60.0)
-        cam_angle  = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
-        distance   = max(0.2, min(self.front_dist, 2.0))
-        world_x    = self.robot_x + distance * math.cos(self.robot_yaw - cam_angle)
-        return world_x
-
-    def is_correct_side(self, colour, pixel_cx):
-        """
-        Return True if the block at pixel_cx appears to be on its correct side.
-
-        Classification logic:
-          - Estimate world_x from odometry + LiDAR.
-          - Red correct side: world_x * red_side_x_sign > SIDE_DEADBAND
-          - Blue correct side: world_x * red_side_x_sign < -SIDE_DEADBAND
-            (blue is opposite to red)
-          - |world_x| < SIDE_DEADBAND → on the line → treat as correct
-            (already qualifies for marks; no need to push further)
-          - sides_known is False → return True (halt after init, don't act)
-        """
-        if not self.sides_known:
-            return True
-
-        world_x = self.estimate_block_world_x(pixel_cx)
-
-        # Within deadband of centre line — counts as correct
-        if abs(world_x) < SIDE_DEADBAND:
-            return True
-
+        d_red  = ang_diff(block_world_bearing, red_b)
+        d_blue = ang_diff(block_world_bearing, blue_b)
         if colour == 'red':
-            return (world_x * self.red_side_x_sign) > 0
-        else:
-            return (world_x * self.red_side_x_sign) < 0
+            return d_red < d_blue
+        return d_blue < d_red
+
+    def block_world_bearing(self, pixel_cx):
+        """Compute world-frame bearing of a block at given camera pixel x."""
+        FOV_RAD = math.radians(60.0)
+        cam_bearing = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
+        return self.robot_yaw - cam_bearing
 
     def _accumulate_yaw_change(self, last_yaw_attr, accum_attr):
         last = getattr(self, last_yaw_attr)
@@ -360,7 +350,21 @@ class BlockSorter(Node):
         accum = self._accumulate_yaw_change('init_spin_last_yaw', 'init_spin_accumulated')
         if accum >= 2 * math.pi * 1.05:
             if self.sides_known:
-                self.get_logger().info('Initial survey complete. Searching.')
+                # Verify both markers were actually seen during the spin
+                red_seen  = self.red_marker_id in self.marker_world_bearings
+                blue_seen = self.blue_marker_id in self.marker_world_bearings
+                if not (red_seen and blue_seen):
+                    self.get_logger().warn(
+                        f'Init spin done but markers missing — '
+                        f'red_seen={red_seen}, blue_seen={blue_seen}. '
+                        f'Spinning again.')
+                    self.init_spin_accumulated = 0.0
+                    self.init_spin_last_yaw    = None
+                    return
+                self.get_logger().info(
+                    f'Init survey complete. Marker bearings: '
+                    f'red={math.degrees(self.marker_world_bearings[self.red_marker_id]):.1f}°, '
+                    f'blue={math.degrees(self.marker_world_bearings[self.blue_marker_id]):.1f}°')
                 self.state = 'SEARCHING'
             else:
                 self.get_logger().error('Sides could not be resolved. Halting.')
@@ -370,12 +374,14 @@ class BlockSorter(Node):
 
     def _do_searching(self):
         for cx, area, *_ in self.red_blocks_pixel:
-            if not self.is_correct_side('red', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('red', bearing):
                 self.get_logger().info('MISPLACED RED block detected',
                                        throttle_duration_sec=2.0)
                 break
         for cx, area, *_ in self.blue_blocks_pixel:
-            if not self.is_correct_side('blue', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('blue', bearing):
                 self.get_logger().info('MISPLACED BLUE block detected',
                                        throttle_duration_sec=2.0)
                 break
@@ -406,10 +412,12 @@ class BlockSorter(Node):
     def _pick_misplaced_block(self):
         candidates = []
         for cx, area, *_ in self.red_blocks_pixel:
-            if not self.is_correct_side('red', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('red', bearing):
                 candidates.append(('red', cx, area))
         for cx, area, *_ in self.blue_blocks_pixel:
-            if not self.is_correct_side('blue', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('blue', bearing):
                 candidates.append(('blue', cx, area))
         if not candidates:
             return None
@@ -566,12 +574,14 @@ class BlockSorter(Node):
 
     def _do_verify_done(self):
         for cx, area, *_ in self.red_blocks_pixel:
-            if not self.is_correct_side('red', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('red', bearing):
                 self.get_logger().info('MISPLACED RED block detected',
                                        throttle_duration_sec=2.0)
                 break
         for cx, area, *_ in self.blue_blocks_pixel:
-            if not self.is_correct_side('blue', cx):
+            bearing = self.block_world_bearing(cx)
+            if not self.is_correct_side('blue', bearing):
                 self.get_logger().info('MISPLACED BLUE block detected',
                                        throttle_duration_sec=2.0)
                 break
