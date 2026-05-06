@@ -55,7 +55,7 @@ RECOVERY_MAX_ATTEMPTS   = 2
 RELEASE_REVERSE_SPEED   = 0.10
 RELEASE_REVERSE_TIME    = 4.5       # ~0.30m
 
-SEARCH_ANGULAR_SPEED    = 0.20
+SEARCH_ANGULAR_SPEED    = 0.40
 INIT_SPIN_ANGULAR_SPEED = 0.4
 ALIGN_GAIN              = 0.005     # block-approach steering
 SAFE_FRONT_STOP         = 0.18      # legacy carry safety (still used as fallback)
