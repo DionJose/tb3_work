@@ -171,14 +171,14 @@ class BlockSorter(Node):
         self.full_scan_angle_inc = msg.angle_increment
 
     def image_cb(self, msg):
-        frame = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
-        self.frame_width = frame.shape[1]
-        frame_bright = cv2.convertScaleAbs(frame, alpha=1.0, beta=40)
+        frame_bright = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
+        self.frame_width = frame_bright.shape[1]
+        # frame_bright = cv2.convertScaleAbs(frame, alpha=1.0, beta=20)
         hsv = cv2.cvtColor(frame_bright, cv2.COLOR_BGR2HSV)
 
         # ----- COLOUR MASKS -------------------------------------------------
         mask_blue = cv2.inRange(
-            hsv, np.array([110, 50, 10]), np.array([145, 255, 255]))
+            hsv, np.array([110, 100, 30]), np.array([135, 255, 255]))
         mask_red_low  = cv2.inRange(hsv, np.array([0,   60, 30]), np.array([15,  255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
         mask_red = cv2.bitwise_or(mask_red_low, mask_red_high)
