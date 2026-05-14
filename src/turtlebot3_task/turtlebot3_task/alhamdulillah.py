@@ -37,6 +37,8 @@ NEAR_AREA_THRESHOLD     = 4000
 COMMIT_AREA_THRESHOLD   = 9500
 COMMIT_OFFSET_THRESHOLD = 80
 CAPTURE_PUSH_DURATION   = 1.2
+BLOCK_AREA_MIN          = 500
+BLOCK_AREA_MAX          = 50000   # reject contours larger than this (e.g. the other robot)
 
 ALIGN_ANGULAR_SPEED     = 0.3
 ALIGN_PIXEL_TOLERANCE   = 50
@@ -253,6 +255,13 @@ class BlockSorter(Node):
         for cnt in cnts:
             area = cv2.contourArea(cnt)
             if area < BLOCK_AREA_MIN:
+                continue
+            if area > BLOCK_AREA_MAX:
+                # Too large to be a block — likely the other robot. Ignore.
+                self.get_logger().info(
+                    f'Ignoring oversized contour (area={area:.0f} > {BLOCK_AREA_MAX}) '
+                    f'— likely not a block.',
+                    throttle_duration_sec=2.0)
                 continue
             x, y, w, h = cv2.boundingRect(cnt)
             cx = x + w // 2
