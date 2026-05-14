@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Sort coloured blocks into their correct half of the arena by pushing.
+Competition mode: runs indefinitely, depositing as many misplaced blocks
+as possible into their correct halves until externally stopped.
 
 Strategy:
-  INIT_SPIN            - full 360°, record world bearings of all visible markers
+  INIT_SPIN            - partial spin to record world bearings of both markers
   SEARCHING            - spin until a misplaced block is visible
   APPROACHING          - drive at the closest misplaced block
   CAPTURE_PUSH         - block disappeared under camera; drive forward briefly
@@ -11,22 +13,8 @@ Strategy:
   RECOVERY_REPOSITION  - if marker not found, move to open space and retry
   CARRY_TO_MARKER      - drive forward, visual servoing on the marker
   RELEASE              - reverse to leave the block deposited
-  VERIFY_DONE          - full 360° check; resume or finish
-  DONE
-
-Side classification
--------------------
-Uses bearing-based classification: during init spin (and ongoing), every
-ArUco marker the camera detects has its WORLD-FRAME bearing recorded
-(i.e. the absolute compass direction from the robot to the marker, using
-robot_yaw from odometry).  When a coloured block is detected, its world
-bearing is compared to the stored marker bearings.  A block whose bearing
-is closer to the red marker's bearing is on the red side; closer to the
-blue marker's bearing is on the blue side.
-
-This works regardless of where the robot starts in the arena and which
-direction it is facing — only the init spin needs to see both markers,
-which it does by spinning a full 360° before any classification matters.
+  RESURVEY             - re-record marker bearings after deposit
+  DONE                 - only reached on classification failure at startup
 """
 import math
 import rclpy
@@ -68,14 +56,16 @@ RECOVERY_MAX_ATTEMPTS   = 2
 RELEASE_REVERSE_SPEED   = 0.10
 RELEASE_REVERSE_TIME    = 4.5
 
-SEARCH_ANGULAR_SPEED    = 0.25
+SEARCH_ANGULAR_SPEED    = 0.4
 INIT_SPIN_ANGULAR_SPEED = 0.4
 ALIGN_GAIN              = 0.005
 SAFE_FRONT_STOP         = 0.18
-# Search watchdog — if SEARCHING spins this many revs without
-# spending >1s in APPROACHING, declare done (handles transient false positives)
-SEARCH_TIMEOUT_REVS     = 2.0
+
 APPROACH_MIN_VALID_TIME = 1.0
+
+# Survey behaviour
+SURVEY_MIN_RADIANS      = math.radians(90.0)
+SURVEY_TIMEOUT_REVS     = 1.5
 # ----------------------------------------------------------------------------
 
 
@@ -118,7 +108,7 @@ class BlockSorter(Node):
         self.blue_blocks_pixel      = []
         self.detected_marker_pixels = {}
         self.detected_marker_widths = {}
-        self.marker_world_bearings  = {}    # id -> world-frame bearing recorded when marker last seen
+        self.marker_world_bearings  = {}
 
         self.red_side_x_sign = None
         self.sides_known     = False
@@ -148,21 +138,22 @@ class BlockSorter(Node):
 
         self._search_slowdown_start = None
 
-        # Search watchdog
-        self.search_spin_accumulated     = 0.0
-        self.search_spin_last_yaw        = None
+        # Approach validity tracking (used to confirm real targets after camera lag)
         self.approach_enter_time         = None
         self.approach_completed_recently = False
 
-        self.verify_spin_accumulated = 0.0
-        self.verify_spin_last_yaw    = None
-        self.verify_saw_misplaced    = False
+        # Resurvey
+        self.resurvey_spin_accumulated = 0.0
+        self.resurvey_spin_last_yaw    = None
+
+        # Deposit counter (informational only — for logs)
+        self.deposits_made = 0
 
         self.timer = self.create_timer(0.1, self.decide)
 
         self.get_logger().info(
             f'Block sorter started. red_marker={self.red_marker_id}, '
-            f'blue_marker={self.blue_marker_id}')
+            f'blue_marker={self.blue_marker_id} (competition mode: no termination)')
 
     # ===== CALLBACKS ========================================================
     def odom_cb(self, msg):
@@ -183,16 +174,13 @@ class BlockSorter(Node):
     def image_cb(self, msg):
         frame_bright = self.bridge.compressed_imgmsg_to_cv2(msg, 'bgr8')
         self.frame_width = frame_bright.shape[1]
-        # frame_bright = cv2.convertScaleAbs(frame, alpha=1.0, beta=20)
         hsv = cv2.cvtColor(frame_bright, cv2.COLOR_BGR2HSV)
 
-        # ----- COLOUR MASKS -------------------------------------------------
         mask_blue = cv2.inRange(
             hsv, np.array([110, 100, 30]), np.array([135, 255, 255]))
         mask_red_low  = cv2.inRange(hsv, np.array([0,   60, 30]), np.array([15,  255, 255]))
         mask_red_high = cv2.inRange(hsv, np.array([155, 60, 30]), np.array([180, 255, 255]))
         mask_red = cv2.bitwise_or(mask_red_low, mask_red_high)
-        # --------------------------------------------------------------------
 
         self.red_blocks_pixel  = self._extract_blocks(mask_red)
         self.blue_blocks_pixel = self._extract_blocks(mask_blue)
@@ -220,16 +208,18 @@ class BlockSorter(Node):
                 self.detected_marker_pixels[int(mid)] = cx_marker
                 self.detected_marker_widths[int(mid)] = width_marker
 
-                # Record world-frame bearing of this marker
-                cam_bearing = (cx_marker - self.frame_width / 2.0) / self.frame_width * FOV_RAD
-                self.marker_world_bearings[int(mid)] = self.robot_yaw - cam_bearing
+                # Record bearings only during INIT_SPIN and RESURVEY
+                if self.state in ('INIT_SPIN', 'RESURVEY'):
+                    cam_bearing = (cx_marker - self.frame_width / 2.0) / self.frame_width * FOV_RAD
+                    self.marker_world_bearings[int(mid)] = self.robot_yaw - cam_bearing
 
         cv2.putText(frame_bright, f'STATE: {self.state}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(frame_bright, f'POS: ({self.robot_x:.2f}, {self.robot_y:.2f})',
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+        cv2.putText(frame_bright, f'DEPOSITS: {self.deposits_made}',
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
 
-        # Diagnostic logging — every visible block, classified, throttled per colour
         if self.sides_known and self.state != 'INIT_SPIN':
             for cx, area, *_ in self.red_blocks_pixel:
                 bearing = self.block_world_bearing(cx)
@@ -286,12 +276,10 @@ class BlockSorter(Node):
             f'Sides resolved: red marker is id={self.red_marker_id}')
 
     def is_correct_side(self, colour, block_world_bearing):
-        """Compare block's world bearing to red and blue marker bearings.
-        Block is on the correct side if its bearing is closer to its colour's marker."""
         red_b  = self.marker_world_bearings.get(self.red_marker_id)
         blue_b = self.marker_world_bearings.get(self.blue_marker_id)
         if red_b is None or blue_b is None:
-            return True  # not enough data yet — don't classify
+            return True
 
         def ang_diff(a, b):
             d = (a - b + math.pi) % (2 * math.pi) - math.pi
@@ -304,7 +292,6 @@ class BlockSorter(Node):
         return d_blue < d_red
 
     def block_world_bearing(self, pixel_cx):
-        """Compute world-frame bearing of a block at given camera pixel x."""
         FOV_RAD = math.radians(60.0)
         cam_bearing = (pixel_cx - self.frame_width / 2.0) / self.frame_width * FOV_RAD
         return self.robot_yaw - cam_bearing
@@ -342,6 +329,10 @@ class BlockSorter(Node):
             return 0.0
         return self.full_scan_angle_min + best_idx * self.full_scan_angle_inc
 
+    def _both_markers_seen(self):
+        return (self.red_marker_id  in self.marker_world_bearings
+                and self.blue_marker_id in self.marker_world_bearings)
+
     # ===== STATE MACHINE ====================================================
     def decide(self):
         if   self.state == 'INIT_SPIN':            self._do_init_spin()
@@ -352,47 +343,40 @@ class BlockSorter(Node):
         elif self.state == 'RECOVERY_REPOSITION':  self._do_recovery_reposition()
         elif self.state == 'CARRY_TO_MARKER':      self._do_carry_to_marker()
         elif self.state == 'RELEASE':              self._do_release()
-        elif self.state == 'VERIFY_DONE':          self._do_verify_done()
+        elif self.state == 'RESURVEY':             self._do_resurvey()
         elif self.state == 'DONE':                 self._publish_cmd(0.0, 0.0)
 
     def _do_init_spin(self):
         self._resolve_sides_if_possible()
-        accum = self._accumulate_yaw_change('init_spin_last_yaw', 'init_spin_accumulated')
-        if accum >= 2 * math.pi * 1.05:
-            if self.sides_known:
-                # Verify both markers were actually seen during the spin
-                red_seen  = self.red_marker_id in self.marker_world_bearings
-                blue_seen = self.blue_marker_id in self.marker_world_bearings
-                if not (red_seen and blue_seen):
-                    self.get_logger().warn(
-                        f'Init spin done but markers missing — '
-                        f'red_seen={red_seen}, blue_seen={blue_seen}. '
-                        f'Spinning again.')
-                    self.init_spin_accumulated = 0.0
-                    self.init_spin_last_yaw    = None
-                    return
-                self.get_logger().info(
-                    f'Init survey complete. Marker bearings: '
-                    f'red={math.degrees(self.marker_world_bearings[self.red_marker_id]):.1f}°, '
-                    f'blue={math.degrees(self.marker_world_bearings[self.blue_marker_id]):.1f}°')
-                self.state = 'SEARCHING'
-            else:
-                self.get_logger().error('Sides could not be resolved. Halting.')
-                self.state = 'DONE'
-            return
-        self._publish_cmd(0.0, INIT_SPIN_ANGULAR_SPEED)
-
-    def _do_searching(self):
-        # Search watchdog: if we've spun too long without a real APPROACHING,
-        # assume there's nothing left to sort.
-        accum = self._accumulate_yaw_change('search_spin_last_yaw', 'search_spin_accumulated')
-        if accum >= 2 * math.pi * SEARCH_TIMEOUT_REVS and not self.approach_completed_recently:
-            self.get_logger().info(
-                f'Search watchdog: spun {SEARCH_TIMEOUT_REVS} revolutions without '
-                f'a valid approach. Assuming done.')
+        if not self.sides_known:
+            self.get_logger().error('Sides could not be resolved. Halting.')
             self.state = 'DONE'
             return
 
+        accum = self._accumulate_yaw_change('init_spin_last_yaw', 'init_spin_accumulated')
+
+        if accum >= SURVEY_MIN_RADIANS and self._both_markers_seen():
+            self.get_logger().info(
+                f'Init survey complete after {math.degrees(accum):.0f}°. Marker bearings: '
+                f'red={math.degrees(self.marker_world_bearings[self.red_marker_id]):.1f}°, '
+                f'blue={math.degrees(self.marker_world_bearings[self.blue_marker_id]):.1f}°')
+            self.state = 'SEARCHING'
+            return
+
+        if accum >= 2 * math.pi * SURVEY_TIMEOUT_REVS:
+            red_seen  = self.red_marker_id in self.marker_world_bearings
+            blue_seen = self.blue_marker_id in self.marker_world_bearings
+            self.get_logger().warn(
+                f'Init spin timeout — red_seen={red_seen}, blue_seen={blue_seen}. '
+                f'Resetting and trying again.')
+            self.init_spin_accumulated = 0.0
+            self.init_spin_last_yaw    = None
+            return
+
+        self._publish_cmd(0.0, INIT_SPIN_ANGULAR_SPEED)
+
+    def _do_searching(self):
+        # No watchdog — competition mode. Keep spinning until a misplaced block is found.
         for cx, area, *_ in self.red_blocks_pixel:
             bearing = self.block_world_bearing(cx)
             if not self.is_correct_side('red', bearing):
@@ -447,8 +431,6 @@ class BlockSorter(Node):
         return candidates[0]
 
     def _do_approaching(self):
-        # Mark this approach as "real" once we've been here for >1s.
-        # Prevents the search watchdog from triggering after legitimate captures.
         if self.approach_enter_time is not None:
             elapsed_in_approach = (self.get_clock().now() - self.approach_enter_time).nanoseconds * 1e-9
             if elapsed_in_approach > APPROACH_MIN_VALID_TIME:
@@ -469,7 +451,7 @@ class BlockSorter(Node):
             self.get_logger().info(f'tracking: area={area:.0f} offset={offset:.0f}')
 
             speed      = APPROACH_SPEED_NEAR if area > NEAR_AREA_THRESHOLD else APPROACH_SPEED_FAR
-            gain_scale = 1.0 if area < NEAR_AREA_THRESHOLD else 0.3
+            gain_scale = 1.0 if area < NEAR_AREA_THRESHOLD else 0.5
             steering_offset = offset if abs(offset) >= 30 else 0
             angular    = -ALIGN_GAIN * steering_offset * gain_scale
             self._publish_cmd(speed, angular)
@@ -492,6 +474,7 @@ class BlockSorter(Node):
         self.min_target_offset_at_max = 0
         self.approach_enter_time      = None
         self.state = 'SEARCHING'
+
     def _do_capture_push(self):
         if self.get_clock().now() >= self.capture_push_until:
             self.capture_push_until     = None
@@ -593,45 +576,45 @@ class BlockSorter(Node):
     def _do_release(self):
         elapsed = (self.get_clock().now() - self.release_start_time).nanoseconds * 1e-9
         if elapsed > RELEASE_REVERSE_TIME:
-            self.verify_spin_accumulated = 0.0
-            self.verify_spin_last_yaw    = None
-            self.verify_saw_misplaced    = False
-            self.get_logger().info('Block released. Verifying.')
-            self.state = 'VERIFY_DONE'
+            self.deposits_made += 1
+            self.get_logger().info(
+                f'Block released. Total deposits: {self.deposits_made}. Re-surveying.')
+
+            # Reset approach tracking
+            self.approach_enter_time         = None
+            self.approach_completed_recently = False
+
+            # Clear bearings so re-survey records fresh ones from new position
+            self.marker_world_bearings   = {}
+
+            # Re-survey from new position
+            self.resurvey_spin_accumulated = 0.0
+            self.resurvey_spin_last_yaw    = None
+            self.state = 'RESURVEY'
             return
         self._publish_cmd(-RELEASE_REVERSE_SPEED, 0.0)
 
-    def _do_verify_done(self):
-        for cx, area, *_ in self.red_blocks_pixel:
-            bearing = self.block_world_bearing(cx)
-            if not self.is_correct_side('red', bearing):
-                self.get_logger().info('MISPLACED RED block detected',
-                                       throttle_duration_sec=2.0)
-                break
-        for cx, area, *_ in self.blue_blocks_pixel:
-            bearing = self.block_world_bearing(cx)
-            if not self.is_correct_side('blue', bearing):
-                self.get_logger().info('MISPLACED BLUE block detected',
-                                       throttle_duration_sec=2.0)
-                break
+    def _do_resurvey(self):
+        accum = self._accumulate_yaw_change('resurvey_spin_last_yaw', 'resurvey_spin_accumulated')
 
-        if self._pick_misplaced_block() is not None:
-            self.verify_saw_misplaced = True
-        accum = self._accumulate_yaw_change('verify_spin_last_yaw', 'verify_spin_accumulated')
-        if accum >= 2 * math.pi * 1.05:
-            if self.verify_saw_misplaced:
-                # Reset watchdog so the next round gets a fresh budget
-                self.search_spin_accumulated     = 0.0
-                self.search_spin_last_yaw        = None
-                self.approach_enter_time         = None
-                self.approach_completed_recently = False
-                self.get_logger().info('Misplaced block(s) remain. Resuming.')
-                self.state = 'SEARCHING'
-            else:
-                self.get_logger().info('All blocks correctly placed. Done.')
-                self.state = 'DONE'
+        if accum >= SURVEY_MIN_RADIANS and self._both_markers_seen():
+            self.get_logger().info(
+                f'Resurvey complete after {math.degrees(accum):.0f}°. Marker bearings: '
+                f'red={math.degrees(self.marker_world_bearings[self.red_marker_id]):.1f}°, '
+                f'blue={math.degrees(self.marker_world_bearings[self.blue_marker_id]):.1f}°')
+            self.state = 'SEARCHING'
             return
-        self._publish_cmd(0.0, SEARCH_ANGULAR_SPEED)
+
+        if accum >= 2 * math.pi * SURVEY_TIMEOUT_REVS:
+            red_seen  = self.red_marker_id  in self.marker_world_bearings
+            blue_seen = self.blue_marker_id in self.marker_world_bearings
+            self.get_logger().warn(
+                f'Resurvey timeout — red_seen={red_seen}, blue_seen={blue_seen}. '
+                f'Proceeding to search with whatever we have.')
+            self.state = 'SEARCHING'
+            return
+
+        self._publish_cmd(0.0, INIT_SPIN_ANGULAR_SPEED)
 
 
 def main(args=None):

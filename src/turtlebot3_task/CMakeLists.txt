@@ -53,4 +53,14 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  turtlebot3_task/astaghfirullah.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(PROGRAMS
+  turtlebot3_task/alhamdulillah.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
